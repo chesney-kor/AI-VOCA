@@ -52,8 +52,6 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[]> => {
       word: item.word,
       nuance: item.nuance,
       examples: item.examples,
-      audioData: item.audio_data, // DB snake_case -> TS camelCase
-      imageUrl: item.image_url,   // DB snake_case -> TS camelCase
       savedAt: new Date(item.created_at).getTime()
     }));
   } catch (error) {
@@ -72,8 +70,6 @@ export const saveWordToDB = async (word: WordDetail): Promise<SavedWord | null> 
         word: word.word,
         nuance: word.nuance,
         examples: word.examples,
-        audio_data: word.audioData || null, // Ensure optional fields are handled
-        image_url: word.imageUrl || null,   // Ensure optional fields are handled
         user_id: userId
       })
     });
@@ -95,7 +91,6 @@ export const saveWordToDB = async (word: WordDetail): Promise<SavedWord | null> 
 export const deleteWordFromDB = async (id: string) => {
   if (!isSupabaseConfigured()) return;
   try {
-    // If ID is a UUID (from Supabase)
     if (id.includes('-')) {
       await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${id}`, {
         method: "DELETE",
@@ -111,13 +106,10 @@ export const uploadLocalWords = async (localWords: SavedWord[]): Promise<number>
   if (!isSupabaseConfigured() || localWords.length === 0) return 0;
   let count = 0;
   for (const word of localWords) {
-    // Cast SavedWord to WordDetail to safely pass it
     const wordToSave: WordDetail = {
       word: word.word,
       nuance: word.nuance,
-      examples: word.examples,
-      audioData: word.audioData,
-      imageUrl: word.imageUrl
+      examples: word.examples
     };
     const saved = await saveWordToDB(wordToSave);
     if (saved) count++;
