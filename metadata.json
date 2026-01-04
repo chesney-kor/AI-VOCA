@@ -1,0 +1,7 @@
+{
+  "name": "EFL AI Lexicon & Vocab Master",
+  "description": "An AI-powered vocabulary learning tool based on EFL principles, providing deep nuances and multi-context examples instead of standard definitions, with built-in quiz features.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
