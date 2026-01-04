@@ -52,6 +52,8 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[]> => {
       word: item.word,
       nuance: item.nuance,
       examples: item.examples,
+      audioData: item.audio_data, // DB snake_case -> TS camelCase
+      imageUrl: item.image_url,   // DB snake_case -> TS camelCase
       savedAt: new Date(item.created_at).getTime()
     }));
   } catch (error) {
@@ -70,6 +72,8 @@ export const saveWordToDB = async (word: Omit<SavedWord, 'id' | 'savedAt'>): Pro
         word: word.word,
         nuance: word.nuance,
         examples: word.examples,
+        audio_data: word.audioData, // TS camelCase -> DB snake_case
+        image_url: word.imageUrl,   // TS camelCase -> DB snake_case
         user_id: userId
       })
     });
