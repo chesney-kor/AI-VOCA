@@ -1,5 +1,5 @@
 
-import { SavedWord } from "../types";
+import { SavedWord, WordDetail } from "../types";
 
 let supabaseUrl = localStorage.getItem('supabase_url') || "";
 let supabaseKey = localStorage.getItem('supabase_key') || "";
@@ -62,7 +62,7 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[]> => {
   }
 };
 
-export const saveWordToDB = async (word: Omit<SavedWord, 'id' | 'savedAt'>): Promise<SavedWord | null> => {
+export const saveWordToDB = async (word: WordDetail): Promise<SavedWord | null> => {
   if (!isSupabaseConfigured()) return null;
   try {
     const res = await fetch(`${supabaseUrl}/rest/v1/saved_words`, {
@@ -72,8 +72,8 @@ export const saveWordToDB = async (word: Omit<SavedWord, 'id' | 'savedAt'>): Pro
         word: word.word,
         nuance: word.nuance,
         examples: word.examples,
-        audio_data: word.audioData, // TS camelCase -> DB snake_case
-        image_url: word.imageUrl,   // TS camelCase -> DB snake_case
+        audio_data: word.audioData || null, // Ensure optional fields are handled
+        image_url: word.imageUrl || null,   // Ensure optional fields are handled
         user_id: userId
       })
     });
@@ -111,7 +111,15 @@ export const uploadLocalWords = async (localWords: SavedWord[]): Promise<number>
   if (!isSupabaseConfigured() || localWords.length === 0) return 0;
   let count = 0;
   for (const word of localWords) {
-    const saved = await saveWordToDB(word);
+    // Cast SavedWord to WordDetail to safely pass it
+    const wordToSave: WordDetail = {
+      word: word.word,
+      nuance: word.nuance,
+      examples: word.examples,
+      audioData: word.audioData,
+      imageUrl: word.imageUrl
+    };
+    const saved = await saveWordToDB(wordToSave);
     if (saved) count++;
   }
   return count;
