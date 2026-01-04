@@ -24,7 +24,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initData = async () => {
-      // 1. Load Chat History first for immediate UI
       const storedMessages = localStorage.getItem('efl_chat_history');
       if (storedMessages) {
         try {
@@ -33,14 +32,12 @@ const App: React.FC = () => {
         } catch (e) { showWelcome(); }
       } else { showWelcome(); }
 
-      // 2. Load Words
       if (db.isSupabaseConfigured()) {
         setIsSyncing(true);
         const cloudWords = await db.fetchWordsFromDB();
         if (cloudWords.length > 0) {
           setSavedWords(cloudWords);
         } else {
-          // Fallback to local if cloud is empty
           loadLocalWords();
         }
         setIsSyncing(false);
@@ -69,7 +66,6 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    // Backup to local storage always
     localStorage.setItem('efl_lexicon_saved', JSON.stringify(savedWords));
   }, [savedWords]);
 
@@ -77,7 +73,11 @@ const App: React.FC = () => {
     if (messages.length > 0) {
       localStorage.setItem('efl_chat_history', JSON.stringify(messages));
     }
-  }, [messages]);
+    // Auto scroll to bottom
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isLoading]);
 
   const handleSearch = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -110,17 +110,20 @@ const App: React.FC = () => {
         if (saved) {
           setSavedWords(prev => [saved, ...prev.filter(w => w.word.toLowerCase() !== details.word.toLowerCase())]);
         } else {
-          // Local fallback if DB fails
           saveLocalOnly(details);
         }
       } else {
         saveLocalOnly(details);
       }
-    } catch (error) {
+    } catch (error: any) {
+      const errorMsg = error.message?.includes("API_KEY") 
+        ? "API Key가 설정되지 않았습니다. GitHub Secrets를 확인해주세요."
+        : "AI 응답을 가져오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+        
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'assistant',
-        content: "Sorry, I had trouble processing that word. Check your connection or API configuration.",
+        content: errorMsg,
         timestamp: Date.now()
       }]);
     } finally { setIsLoading(false); }
@@ -198,7 +201,7 @@ const App: React.FC = () => {
                             ? 'bg-indigo-600 text-white font-semibold rounded-tr-none shadow-indigo-100' 
                             : 'bg-white text-slate-800 border border-slate-200/60 font-medium rounded-tl-none'
                         }`}>
-                          <p className="text-[15px] leading-relaxed">{msg.content as string}</p>
+                          <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.content as string}</p>
                         </div>
                       )}
                     </div>
@@ -234,7 +237,10 @@ const App: React.FC = () => {
                   <div className="grid grid-cols-1 gap-3">
                     {savedWords.map((word) => (
                       <div key={word.id} className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-sm flex items-center justify-between active:scale-[0.98] transition-all"
-                           onClick={() => { setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: word, timestamp: Date.now() }]); setActiveTab('chat'); }}>
+                           onClick={() => { 
+                             setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: word, timestamp: Date.now() }]); 
+                             setActiveTab('chat'); 
+                           }}>
                         <div className="flex-1">
                           <h3 className="text-lg font-black text-indigo-600 uppercase tracking-tight mb-0.5">{word.word}</h3>
                           <p className="text-slate-500 text-xs italic line-clamp-1">{word.nuance}</p>
