@@ -282,7 +282,7 @@ const App: React.FC = () => {
             <div className="mt-8 flex gap-3">
               <button onClick={saveSettings} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-indigo-100 active:scale-95 transition-all">Save & Sync Now</button>
             </div>
-            <p className="mt-4 text-[10px] text-center text-slate-400 font-medium">Supabase 프로젝트의 Project Settings > API 에서 확인 가능합니다.</p>
+            <p className="mt-4 text-[10px] text-center text-slate-400 font-medium">Supabase 프로젝트의 Project Settings {'>'} API 에서 확인 가능합니다.</p>
           </div>
         </div>
       )}
