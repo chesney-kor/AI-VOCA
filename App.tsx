@@ -12,6 +12,7 @@ const App: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [savedWords, setSavedWords] = useState<SavedWord[]>([]);
+  const [selectedWord, setSelectedWord] = useState<SavedWord | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   
@@ -131,7 +132,8 @@ const App: React.FC = () => {
 
   const saveLocalOnly = (details: WordDetail) => {
     setSavedWords(prev => {
-      if (prev.some(w => w.word.toLowerCase() === details.word.toLowerCase())) return prev;
+      const exists = prev.find(w => w.word.toLowerCase() === details.word.toLowerCase());
+      if (exists) return prev;
       return [{ ...details, id: Date.now().toString(), savedAt: Date.now() }, ...prev];
     });
   };
@@ -141,6 +143,7 @@ const App: React.FC = () => {
       await db.deleteWordFromDB(id);
     }
     setSavedWords(prev => prev.filter(w => w.id !== id));
+    if (selectedWord?.id === id) setSelectedWord(null);
   };
 
   const saveSettings = async () => {
@@ -236,18 +239,18 @@ const App: React.FC = () => {
                 ) : (
                   <div className="grid grid-cols-1 gap-3">
                     {savedWords.map((word) => (
-                      <div key={word.id} className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-sm flex items-center justify-between active:scale-[0.98] transition-all"
-                           onClick={() => { 
-                             setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: word, timestamp: Date.now() }]); 
-                             setActiveTab('chat'); 
-                           }}>
+                      <div key={word.id} className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-sm flex items-center justify-between active:scale-[0.98] transition-all cursor-pointer group"
+                           onClick={() => setSelectedWord(word)}>
                         <div className="flex-1">
-                          <h3 className="text-lg font-black text-indigo-600 uppercase tracking-tight mb-0.5">{word.word}</h3>
+                          <h3 className="text-lg font-black text-indigo-600 uppercase tracking-tight mb-0.5 group-hover:text-indigo-800 transition-colors">{word.word}</h3>
                           <p className="text-slate-500 text-xs italic line-clamp-1">{word.nuance}</p>
                         </div>
-                        <button onClick={(e) => { e.stopPropagation(); removeWord(word.id); }} className="text-slate-300 hover:text-rose-500 p-2 transition-colors">
-                          <i className="fa-solid fa-trash-can"></i>
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <i className="fa-solid fa-chevron-right text-slate-300 text-xs transition-transform group-hover:translate-x-1"></i>
+                          <button onClick={(e) => { e.stopPropagation(); removeWord(word.id); }} className="text-slate-300 hover:text-rose-500 p-2 transition-colors">
+                            <i className="fa-solid fa-trash-can"></i>
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -258,6 +261,62 @@ const App: React.FC = () => {
             {activeTab === 'quiz' && <QuizView savedWords={savedWords} />}
           </div>
         </div>
+
+        {/* Word Detail Overlay (Slide Up) */}
+        {selectedWord && (
+          <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm flex items-end justify-center animate-in fade-in duration-300">
+            <div className="bg-slate-50 w-full max-w-2xl h-[90%] rounded-t-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-full duration-500">
+              <div className="px-8 pt-8 pb-4 flex justify-between items-center">
+                <button 
+                  onClick={() => setSelectedWord(null)}
+                  className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-indigo-600 shadow-sm transition-all active:scale-90"
+                >
+                  <i className="fa-solid fa-arrow-left"></i>
+                </button>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Detail View</span>
+                </div>
+                <button 
+                  onClick={() => removeWord(selectedWord.id)}
+                  className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center text-rose-500 shadow-sm transition-all active:scale-90"
+                >
+                  <i className="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto custom-scrollbar px-6 pb-20">
+                <div className="max-w-xl mx-auto py-6">
+                  <WordDetailCard data={selectedWord} />
+                  
+                  <div className="mt-8 flex flex-col gap-3">
+                    <button 
+                      onClick={() => {
+                        setMessages(prev => [...prev, {
+                          id: Date.now().toString(),
+                          role: 'assistant',
+                          content: selectedWord,
+                          timestamp: Date.now()
+                        }]);
+                        setSelectedWord(null);
+                        setActiveTab('chat');
+                      }}
+                      className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-3"
+                    >
+                      <i className="fa-solid fa-comment-dots"></i>
+                      Show in Chat History
+                    </button>
+                    <button 
+                      onClick={() => setSelectedWord(null)}
+                      className="w-full py-5 bg-white text-slate-400 rounded-[2rem] font-black text-sm uppercase tracking-widest border border-slate-200 active:scale-95 transition-all"
+                    >
+                      Close Detail
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Settings Modal */}
