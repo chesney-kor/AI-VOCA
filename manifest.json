@@ -2,12 +2,18 @@
 {
   "name": "LEXI AI EFL Dictionary",
   "short_name": "LEXI AI",
-  "start_url": ".",
+  "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#4f46e5",
   "description": "AI-powered vocabulary learning tool based on EFL principles.",
   "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3898/3898082.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
     {
       "src": "https://cdn-icons-png.flaticon.com/512/3898/3898082.png",
       "sizes": "512x512",
