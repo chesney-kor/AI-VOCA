@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ChatMessage, SavedWord, WordDetail } from './types';
 import { getWordDetails } from './services/geminiService';
 import * as db from './services/supabaseService';
@@ -23,8 +23,40 @@ const App: React.FC = () => {
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Sync with Cloud
+  const syncWithCloud = useCallback(async (localData: SavedWord[]) => {
+    if (!db.isSupabaseConfigured()) return localData;
+    
+    setIsSyncing(true);
+    try {
+      // 1. Cloud 데이터 가져오기
+      const cloudWords = await db.fetchWordsFromDB();
+      
+      // 2. 로컬에만 있는 데이터 필터링 (중복 제외)
+      const cloudWordNames = new Set(cloudWords.map(w => w.word.toLowerCase()));
+      const localOnlyWords = localData.filter(w => !cloudWordNames.has(w.word.toLowerCase()));
+
+      // 3. 로컬 전용 데이터 업로드
+      if (localOnlyWords.length > 0) {
+        await db.uploadLocalWords(localOnlyWords);
+        // 업로드 후 다시 가져오기 (ID 확정을 위해)
+        const finalWords = await db.fetchWordsFromDB();
+        setIsSyncing(false);
+        return finalWords;
+      }
+      
+      setIsSyncing(false);
+      return cloudWords.length > 0 ? cloudWords : localData;
+    } catch (e) {
+      console.error("Sync error:", e);
+      setIsSyncing(false);
+      return localData;
+    }
+  }, []);
+
   useEffect(() => {
     const initData = async () => {
+      // Load messages
       const storedMessages = localStorage.getItem('efl_chat_history');
       if (storedMessages) {
         try {
@@ -33,29 +65,24 @@ const App: React.FC = () => {
         } catch (e) { showWelcome(); }
       } else { showWelcome(); }
 
-      if (db.isSupabaseConfigured()) {
-        setIsSyncing(true);
-        const cloudWords = await db.fetchWordsFromDB();
-        if (cloudWords.length > 0) {
-          setSavedWords(cloudWords);
-        } else {
-          loadLocalWords();
-        }
-        setIsSyncing(false);
-      } else {
-        loadLocalWords();
-      }
-    };
-
-    const loadLocalWords = () => {
+      // Load local words first
+      let currentWords: SavedWord[] = [];
       const storedWords = localStorage.getItem('efl_lexicon_saved');
       if (storedWords) {
-        try { setSavedWords(JSON.parse(storedWords)); } catch (e) {}
+        try { currentWords = JSON.parse(storedWords); } catch (e) {}
+      }
+
+      // If DB configured, sync
+      if (db.isSupabaseConfigured()) {
+        const syncedWords = await syncWithCloud(currentWords);
+        setSavedWords(syncedWords);
+      } else {
+        setSavedWords(currentWords);
       }
     };
 
     initData();
-  }, []);
+  }, [syncWithCloud]);
 
   const showWelcome = () => {
     setMessages([{
@@ -74,7 +101,6 @@ const App: React.FC = () => {
     if (messages.length > 0) {
       localStorage.setItem('efl_chat_history', JSON.stringify(messages));
     }
-    // Auto scroll to bottom
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
@@ -104,8 +130,9 @@ const App: React.FC = () => {
         content: details,
         timestamp: Date.now()
       };
-      setMessages(prev => [...prev, assistantMessage]);
       
+      setMessages(prev => [...prev, assistantMessage]);
+
       if (db.isSupabaseConfigured()) {
         const saved = await db.saveWordToDB(details);
         if (saved) {
@@ -117,14 +144,11 @@ const App: React.FC = () => {
         saveLocalOnly(details);
       }
     } catch (error: any) {
-      const errorMsg = error.message?.includes("API_KEY") 
-        ? "API Key가 설정되지 않았습니다. GitHub Secrets를 확인해주세요."
-        : "AI 응답을 가져오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
-        
+      console.error(error);
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'assistant',
-        content: errorMsg,
+        content: "AI 응답을 가져오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
         timestamp: Date.now()
       }]);
     } finally { setIsLoading(false); }
@@ -150,18 +174,24 @@ const App: React.FC = () => {
     db.setSupabaseConfig(dbUrl, dbKey, dbUserId);
     const isWorking = await db.testConnection();
     if (isWorking) {
-      if (savedWords.length > 0 && confirm("기존 로컬 단어들을 Supabase 클라우드로 업로드할까요?")) {
-        setIsSyncing(true);
-        await db.uploadLocalWords(savedWords);
-        const freshWords = await db.fetchWordsFromDB();
-        setSavedWords(freshWords);
-        setIsSyncing(false);
-      }
+      setIsSyncing(true);
+      const synced = await syncWithCloud(savedWords);
+      setSavedWords(synced);
+      setIsSyncing(false);
       setIsSettingsOpen(false);
-      alert("클라우드 연결 성공!");
+      alert("연결 성공! 클라우드와 데이터 동기화가 완료되었습니다.");
     } else {
-      alert("연결 실패! URL과 Key를 다시 확인해 주세요.");
+      alert("Supabase 연결 실패! URL과 Key를 다시 확인해 주세요.");
     }
+  };
+
+  const manualSync = async () => {
+    if (!db.isSupabaseConfigured()) {
+      setIsSettingsOpen(true);
+      return;
+    }
+    const synced = await syncWithCloud(savedWords);
+    setSavedWords(synced);
   };
 
   return (
@@ -231,6 +261,16 @@ const App: React.FC = () => {
                       {db.isSupabaseConfigured() ? 'Cloud Sync' : 'Local Only'}
                     </span>
                   </h2>
+                  {db.isSupabaseConfigured() && (
+                    <button 
+                      onClick={manualSync}
+                      disabled={isSyncing}
+                      className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center gap-2 active:scale-95 transition-all"
+                    >
+                      <i className={`fa-solid fa-arrows-rotate ${isSyncing ? 'animate-spin' : ''}`}></i>
+                      Sync Now
+                    </button>
+                  )}
                 </div>
                 {savedWords.length === 0 ? (
                   <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-slate-200">
@@ -262,55 +302,23 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Word Detail Overlay (Slide Up) */}
+        {/* Word Detail Overlay */}
         {selectedWord && (
           <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm flex items-end justify-center animate-in fade-in duration-300">
             <div className="bg-slate-50 w-full max-w-2xl h-[90%] rounded-t-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-full duration-500">
               <div className="px-8 pt-8 pb-4 flex justify-between items-center">
-                <button 
-                  onClick={() => setSelectedWord(null)}
-                  className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-indigo-600 shadow-sm transition-all active:scale-90"
-                >
-                  <i className="fa-solid fa-arrow-left"></i>
-                </button>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Detail View</span>
-                </div>
-                <button 
-                  onClick={() => removeWord(selectedWord.id)}
-                  className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center text-rose-500 shadow-sm transition-all active:scale-90"
-                >
-                  <i className="fa-solid fa-trash-can"></i>
-                </button>
+                <button onClick={() => setSelectedWord(null)} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-indigo-600 shadow-sm transition-all active:scale-90"><i className="fa-solid fa-arrow-left"></i></button>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Detail View</span>
+                <button onClick={() => removeWord(selectedWord.id)} className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center text-rose-500 shadow-sm transition-all active:scale-90"><i className="fa-solid fa-trash-can"></i></button>
               </div>
-              
               <div className="flex-1 overflow-y-auto custom-scrollbar px-6 pb-20">
                 <div className="max-w-xl mx-auto py-6">
                   <WordDetailCard data={selectedWord} />
-                  
                   <div className="mt-8 flex flex-col gap-3">
-                    <button 
-                      onClick={() => {
-                        setMessages(prev => [...prev, {
-                          id: Date.now().toString(),
-                          role: 'assistant',
-                          content: selectedWord,
-                          timestamp: Date.now()
-                        }]);
-                        setSelectedWord(null);
-                        setActiveTab('chat');
-                      }}
-                      className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-3"
-                    >
-                      <i className="fa-solid fa-comment-dots"></i>
-                      Show in Chat History
+                    <button onClick={() => { setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: selectedWord, timestamp: Date.now() }]); setSelectedWord(null); setActiveTab('chat'); }} className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-3">
+                      <i className="fa-solid fa-comment-dots"></i> Show in Chat History
                     </button>
-                    <button 
-                      onClick={() => setSelectedWord(null)}
-                      className="w-full py-5 bg-white text-slate-400 rounded-[2rem] font-black text-sm uppercase tracking-widest border border-slate-200 active:scale-95 transition-all"
-                    >
-                      Close Detail
-                    </button>
+                    <button onClick={() => setSelectedWord(null)} className="w-full py-5 bg-white text-slate-400 rounded-[2rem] font-black text-sm uppercase tracking-widest border border-slate-200 active:scale-95 transition-all">Close Detail</button>
                   </div>
                 </div>
               </div>
@@ -328,7 +336,6 @@ const App: React.FC = () => {
               <button onClick={() => setIsSettingsOpen(false)} className="text-slate-300 hover:text-slate-600"><i className="fa-solid fa-xmark text-xl"></i></button>
             </div>
             <p className="text-slate-500 text-sm mb-6 font-medium">데이터를 클라우드에 안전하게 저장하세요.</p>
-            
             <div className="space-y-4">
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Supabase URL</label>
@@ -340,19 +347,17 @@ const App: React.FC = () => {
               </div>
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Your ID</label>
-                <input value={dbUserId} onChange={e => setDbUserId(e.target.value)} className="w-full mt-1 px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 font-medium text-sm outline-none focus:border-indigo-500" placeholder="iphone_user_1" />
+                <input value={dbUserId} onChange={e => setDbUserId(e.target.value)} className="w-full mt-1 px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 font-medium text-sm outline-none focus:border-indigo-500" placeholder="my_unique_id" />
               </div>
             </div>
-
-            <div className="mt-8 flex gap-3">
-              <button onClick={saveSettings} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-indigo-100 active:scale-95 transition-all">Save & Sync Now</button>
+            <div className="mt-8">
+              <button onClick={saveSettings} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-indigo-100 active:scale-95 transition-all">Save & Sync</button>
             </div>
-            <p className="mt-4 text-[10px] text-center text-slate-400 font-medium">Supabase 프로젝트의 Project Settings {'>'} API 에서 확인 가능합니다.</p>
           </div>
         </div>
       )}
 
-      {/* Floating Search (Chat Tab) */}
+      {/* Floating Search */}
       {activeTab === 'chat' && (
         <div className="fixed left-0 right-0 px-4 z-40 pointer-events-none" style={{ bottom: 'calc(env(safe-area-inset-bottom) + 85px)' }}>
           <form onSubmit={handleSearch} className="max-w-2xl mx-auto relative pointer-events-auto">
