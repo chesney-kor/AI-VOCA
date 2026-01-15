@@ -21,7 +21,7 @@ const App: React.FC = () => {
   const [dbKey, setDbKey] = useState(localStorage.getItem('supabase_key') || "");
   const [dbUserId, setDbUserId] = useState(localStorage.getItem('supabase_user_id') || "my_lexicon_user");
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   // Sync with Cloud
   const syncWithCloud = useCallback(async (localData: SavedWord[]) => {
@@ -29,17 +29,12 @@ const App: React.FC = () => {
     
     setIsSyncing(true);
     try {
-      // 1. Cloud 데이터 가져오기
       const cloudWords = await db.fetchWordsFromDB();
-      
-      // 2. 로컬에만 있는 데이터 필터링 (중복 제외)
       const cloudWordNames = new Set(cloudWords.map(w => w.word.toLowerCase()));
       const localOnlyWords = localData.filter(w => !cloudWordNames.has(w.word.toLowerCase()));
 
-      // 3. 로컬 전용 데이터 업로드
       if (localOnlyWords.length > 0) {
         await db.uploadLocalWords(localOnlyWords);
-        // 업로드 후 다시 가져오기 (ID 확정을 위해)
         const finalWords = await db.fetchWordsFromDB();
         setIsSyncing(false);
         return finalWords;
@@ -56,7 +51,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initData = async () => {
-      // Load messages
       const storedMessages = localStorage.getItem('efl_chat_history');
       if (storedMessages) {
         try {
@@ -65,14 +59,12 @@ const App: React.FC = () => {
         } catch (e) { showWelcome(); }
       } else { showWelcome(); }
 
-      // Load local words first
       let currentWords: SavedWord[] = [];
       const storedWords = localStorage.getItem('efl_lexicon_saved');
       if (storedWords) {
         try { currentWords = JSON.parse(storedWords); } catch (e) {}
       }
 
-      // If DB configured, sync
       if (db.isSupabaseConfigured()) {
         const syncedWords = await syncWithCloud(currentWords);
         setSavedWords(syncedWords);
@@ -97,14 +89,18 @@ const App: React.FC = () => {
     localStorage.setItem('efl_lexicon_saved', JSON.stringify(savedWords));
   }, [savedWords]);
 
+  // Chat Auto-scroll logic (Only for chat tab)
   useEffect(() => {
     if (messages.length > 0) {
       localStorage.setItem('efl_chat_history', JSON.stringify(messages));
     }
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (activeTab === 'chat' && chatScrollRef.current) {
+      chatScrollRef.current.scrollTo({
+        top: chatScrollRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, activeTab]);
 
   const handleSearch = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -219,86 +215,90 @@ const App: React.FC = () => {
 
       {/* Main Viewport */}
       <main className="flex-1 relative overflow-hidden bg-slate-50">
-        <div ref={scrollRef} className="h-full overflow-y-auto custom-scrollbar px-4 py-6 pb-48">
-          <div className="max-w-2xl mx-auto">
-            {activeTab === 'chat' && (
-              <div className="space-y-6">
-                {messages.map((msg) => (
-                  <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
-                    <div className={`max-w-[90%] ${msg.role === 'user' ? 'order-2' : ''}`}>
-                      {msg.role === 'assistant' && typeof msg.content === 'object' ? (
-                        <WordDetailCard data={msg.content} />
-                      ) : (
-                        <div className={`px-5 py-3.5 rounded-2xl shadow-sm ${
-                          msg.role === 'user' 
-                            ? 'bg-indigo-600 text-white font-semibold rounded-tr-none shadow-indigo-100' 
-                            : 'bg-white text-slate-800 border border-slate-200/60 font-medium rounded-tl-none'
-                        }`}>
-                          <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.content as string}</p>
-                        </div>
-                      )}
+        
+        {/* Chat Tab (Search) */}
+        <div className={`absolute inset-0 overflow-y-auto custom-scrollbar px-4 py-6 pb-48 transition-opacity duration-300 ${activeTab === 'chat' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`} ref={chatScrollRef}>
+          <div className="max-w-2xl mx-auto space-y-6">
+            {messages.map((msg) => (
+              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
+                <div className={`max-w-[90%] ${msg.role === 'user' ? 'order-2' : ''}`}>
+                  {msg.role === 'assistant' && typeof msg.content === 'object' ? (
+                    <WordDetailCard data={msg.content} />
+                  ) : (
+                    <div className={`px-5 py-3.5 rounded-2xl shadow-sm ${
+                      msg.role === 'user' 
+                        ? 'bg-indigo-600 text-white font-semibold rounded-tr-none shadow-indigo-100' 
+                        : 'bg-white text-slate-800 border border-slate-200/60 font-medium rounded-tl-none'
+                    }`}>
+                      <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.content as string}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-white border border-slate-100 p-4 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce"></div>
+                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* List Tab (Vocab) */}
+        <div className={`absolute inset-0 overflow-y-auto custom-scrollbar px-4 py-6 pb-20 transition-opacity duration-300 ${activeTab === 'list' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="flex items-center justify-between px-2">
+              <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+                Vocab 
+                <span className={`ml-2 text-[10px] px-2 py-0.5 rounded-full align-middle uppercase tracking-widest ${db.isSupabaseConfigured() ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                  {db.isSupabaseConfigured() ? 'Cloud Sync' : 'Local Only'}
+                </span>
+              </h2>
+              {db.isSupabaseConfigured() && (
+                <button 
+                  onClick={manualSync}
+                  disabled={isSyncing}
+                  className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center gap-2 active:scale-95 transition-all"
+                >
+                  <i className={`fa-solid fa-arrows-rotate ${isSyncing ? 'animate-spin' : ''}`}></i>
+                  Sync Now
+                </button>
+              )}
+            </div>
+            {savedWords.length === 0 ? (
+              <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-slate-200">
+                <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No words in your lexicon</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                {savedWords.map((word) => (
+                  <div key={word.id} className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-sm flex items-center justify-between active:scale-[0.98] transition-all cursor-pointer group"
+                       onClick={() => setSelectedWord(word)}>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-black text-indigo-600 uppercase tracking-tight mb-0.5 group-hover:text-indigo-800 transition-colors">{word.word}</h3>
+                      <p className="text-slate-500 text-xs italic line-clamp-1">{word.nuance}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <i className="fa-solid fa-chevron-right text-slate-300 text-xs transition-transform group-hover:translate-x-1"></i>
+                      <button onClick={(e) => { e.stopPropagation(); removeWord(word.id); }} className="text-slate-300 hover:text-rose-500 p-2 transition-colors">
+                        <i className="fa-solid fa-trash-can"></i>
+                      </button>
                     </div>
                   </div>
                 ))}
-                {isLoading && (
-                  <div className="flex justify-start">
-                    <div className="bg-white border border-slate-100 p-4 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce"></div>
-                      <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:0.2s]"></div>
-                      <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:0.4s]"></div>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
+          </div>
+        </div>
 
-            {activeTab === 'list' && (
-              <div className="space-y-6 animate-in fade-in">
-                <div className="flex items-center justify-between px-2">
-                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                    Vocab 
-                    <span className={`ml-2 text-[10px] px-2 py-0.5 rounded-full align-middle uppercase tracking-widest ${db.isSupabaseConfigured() ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-                      {db.isSupabaseConfigured() ? 'Cloud Sync' : 'Local Only'}
-                    </span>
-                  </h2>
-                  {db.isSupabaseConfigured() && (
-                    <button 
-                      onClick={manualSync}
-                      disabled={isSyncing}
-                      className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center gap-2 active:scale-95 transition-all"
-                    >
-                      <i className={`fa-solid fa-arrows-rotate ${isSyncing ? 'animate-spin' : ''}`}></i>
-                      Sync Now
-                    </button>
-                  )}
-                </div>
-                {savedWords.length === 0 ? (
-                  <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-slate-200">
-                    <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No words in your lexicon</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-3">
-                    {savedWords.map((word) => (
-                      <div key={word.id} className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-sm flex items-center justify-between active:scale-[0.98] transition-all cursor-pointer group"
-                           onClick={() => setSelectedWord(word)}>
-                        <div className="flex-1">
-                          <h3 className="text-lg font-black text-indigo-600 uppercase tracking-tight mb-0.5 group-hover:text-indigo-800 transition-colors">{word.word}</h3>
-                          <p className="text-slate-500 text-xs italic line-clamp-1">{word.nuance}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <i className="fa-solid fa-chevron-right text-slate-300 text-xs transition-transform group-hover:translate-x-1"></i>
-                          <button onClick={(e) => { e.stopPropagation(); removeWord(word.id); }} className="text-slate-300 hover:text-rose-500 p-2 transition-colors">
-                            <i className="fa-solid fa-trash-can"></i>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'quiz' && <QuizView savedWords={savedWords} />}
+        {/* Quiz Tab */}
+        <div className={`absolute inset-0 overflow-y-auto custom-scrollbar px-4 py-6 pb-20 transition-opacity duration-300 ${activeTab === 'quiz' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
+          <div className="max-w-2xl mx-auto">
+            <QuizView savedWords={savedWords} />
           </div>
         </div>
 
@@ -357,17 +357,15 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Floating Search */}
-      {activeTab === 'chat' && (
-        <div className="fixed left-0 right-0 px-4 z-40 pointer-events-none" style={{ bottom: 'calc(env(safe-area-inset-bottom) + 85px)' }}>
-          <form onSubmit={handleSearch} className="max-w-2xl mx-auto relative pointer-events-auto">
-            <div className="relative group">
-              <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="Explore a word essence..." className="w-full bg-white/95 backdrop-blur-xl border-2 border-slate-200/50 focus:border-indigo-500 focus:ring-[6px] focus:ring-indigo-500/10 rounded-[2rem] px-7 py-5 pr-16 text-base font-bold shadow-2xl shadow-indigo-100/30 outline-none" disabled={isLoading} />
-              <button type="submit" disabled={!inputValue.trim() || isLoading} className="absolute right-2 top-1/2 -translate-y-1/2 w-12 h-12 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all"><i className="fa-solid fa-arrow-up text-lg"></i></button>
-            </div>
-          </form>
-        </div>
-      )}
+      {/* Floating Search (Only in Chat Tab) */}
+      <div className={`fixed left-0 right-0 px-4 z-40 transition-all duration-300 pointer-events-none ${activeTab === 'chat' ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`} style={{ bottom: 'calc(env(safe-area-inset-bottom) + 85px)' }}>
+        <form onSubmit={handleSearch} className="max-w-2xl mx-auto relative pointer-events-auto">
+          <div className="relative group">
+            <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="Explore a word essence..." className="w-full bg-white/95 backdrop-blur-xl border-2 border-slate-200/50 focus:border-indigo-500 focus:ring-[6px] focus:ring-indigo-500/10 rounded-[2rem] px-7 py-5 pr-16 text-base font-bold shadow-2xl shadow-indigo-100/30 outline-none" disabled={isLoading} />
+            <button type="submit" disabled={!inputValue.trim() || isLoading} className="absolute right-2 top-1/2 -translate-y-1/2 w-12 h-12 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all"><i className="fa-solid fa-arrow-up text-lg"></i></button>
+          </div>
+        </form>
+      </div>
 
       {/* Bottom Nav */}
       <footer className="glass border-t border-slate-200/50 grid grid-cols-3 z-50 bg-white/90" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
