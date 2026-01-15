@@ -93,7 +93,7 @@ const App: React.FC = () => {
     localStorage.setItem('efl_lexicon_saved', JSON.stringify(savedWords));
   }, [savedWords]);
 
-  // Chat Auto-scroll logic (Only for chat tab)
+  // Chat Auto-scroll logic
   useEffect(() => {
     if (messages.length > 0) {
       localStorage.setItem('efl_chat_history', JSON.stringify(messages));
@@ -125,8 +125,14 @@ const App: React.FC = () => {
     try {
       const details = await getWordDetails(query);
       
+      // Check if word already exists in local list to preserve userSentence
+      const existingInVocab = savedWords.find(w => w.word.toLowerCase() === details.word.toLowerCase());
+      const wordToSave = existingInVocab 
+        ? { ...details, userSentence: existingInVocab.userSentence } 
+        : details;
+
       if (db.isSupabaseConfigured()) {
-        const saved = await db.saveWordToDB(details);
+        const saved = await db.saveWordToDB(wordToSave);
         if (saved) {
           const assistantMessage: ChatMessage = {
             id: (Date.now() + 1).toString(),
@@ -137,10 +143,10 @@ const App: React.FC = () => {
           setMessages(prev => [...prev, assistantMessage]);
           setSavedWords(prev => [saved, ...prev.filter(w => w.word.toLowerCase() !== details.word.toLowerCase())]);
         } else {
-          saveLocalOnly(details);
+          saveLocalOnly(wordToSave);
         }
       } else {
-        saveLocalOnly(details);
+        saveLocalOnly(wordToSave);
       }
     } catch (error: any) {
       console.error(error);
@@ -153,14 +159,21 @@ const App: React.FC = () => {
     } finally { setIsLoading(false); }
   };
 
-  const saveLocalOnly = (details: WordDetail) => {
-    const newId = Date.now().toString();
-    const newSaved: SavedWord = { ...details, id: newId, savedAt: Date.now() };
+  const saveLocalOnly = (details: WordDetail | SavedWord) => {
+    const existing = savedWords.find(w => w.word.toLowerCase() === details.word.toLowerCase());
+    const newId = existing ? existing.id : Date.now().toString();
+    const newSaved: SavedWord = { 
+      ...details, 
+      id: newId, 
+      savedAt: existing ? existing.savedAt : Date.now(),
+      userSentence: (details as SavedWord).userSentence || (existing ? existing.userSentence : undefined)
+    };
+
     setSavedWords(prev => {
-      const exists = prev.find(w => w.word.toLowerCase() === details.word.toLowerCase());
-      if (exists) return prev;
-      return [newSaved, ...prev];
+      const filtered = prev.filter(w => w.word.toLowerCase() !== details.word.toLowerCase());
+      return [newSaved, ...filtered];
     });
+
     setMessages(prev => [...prev, {
       id: (Date.now() + 1).toString(),
       role: 'assistant',
@@ -180,28 +193,40 @@ const App: React.FC = () => {
   const updateUserPractice = async (wordId: string, sentence: string) => {
     if (!wordId) return;
 
-    // 1. Update Saved Words State
-    setSavedWords(prev => prev.map(w => w.id === wordId ? { ...w, userSentence: sentence } : w));
+    // Find the word name to sync all instances of this word
+    const targetWordObj = savedWords.find(w => w.id === wordId);
+    const targetWordName = targetWordObj?.word.toLowerCase();
+
+    // 1. Update Saved Words State (Sync by ID and Word Name)
+    setSavedWords(prev => prev.map(w => 
+      (w.id === wordId || (targetWordName && w.word.toLowerCase() === targetWordName))
+        ? { ...w, userSentence: sentence } 
+        : w
+    ));
     
     // 2. Update Supabase if word exists there
-    if (db.isSupabaseConfigured()) {
-      const wordToSync = savedWords.find(w => w.id === wordId);
-      if (wordToSync) {
-        await db.saveWordToDB({ ...wordToSync, userSentence: sentence });
-      }
+    if (db.isSupabaseConfigured() && targetWordObj) {
+      await db.saveWordToDB({ ...targetWordObj, userSentence: sentence });
     }
 
-    // 3. Update Chat Messages History (Safety improved)
+    // 3. Update ALL Chat Messages with this word (Synchronize Search and Vocab)
     setMessages(prev => prev.map(msg => {
       const content = msg.content;
-      if (content && typeof content === 'object' && 'id' in content && content.id === wordId) {
-        return { ...msg, content: { ...content, userSentence: sentence } as SavedWord };
+      if (content && typeof content === 'object' && 'word' in content) {
+        // Correctly handle property access on WordDetail | SavedWord union by using type-safe checks
+        const wordContent = content as (WordDetail | SavedWord);
+        const msgWord = wordContent.word.toLowerCase();
+        const msgId = 'id' in wordContent ? (wordContent as SavedWord).id : undefined;
+
+        if (msgId === wordId || (targetWordName && msgWord === targetWordName)) {
+          return { ...msg, content: { ...content, userSentence: sentence } as SavedWord };
+        }
       }
       return msg;
     }));
 
-    // 4. Update selected word if open
-    if (selectedWord?.id === wordId) {
+    // 4. Update selected word if it's currently open
+    if (selectedWord && (selectedWord.id === wordId || (targetWordName && selectedWord.word.toLowerCase() === targetWordName))) {
       setSelectedWord(prev => prev ? { ...prev, userSentence: sentence } : null);
     }
   };

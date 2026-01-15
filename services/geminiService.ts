@@ -3,7 +3,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { WordDetail, QuizQuestion } from "../types";
 import { SYSTEM_INSTRUCTION } from "../constants";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+// Initialize GoogleGenAI with the provided API key from environment variables
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const cleanJSONResponse = (text: string) => {
   return text.replace(/```json\n?|```/g, '').trim();
