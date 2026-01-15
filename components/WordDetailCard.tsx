@@ -8,6 +8,9 @@ interface WordDetailCardProps {
 }
 
 const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice }) => {
+  // Safety check for data
+  if (!data || !data.word) return null;
+
   const [practiceText, setPracticeText] = useState((data as SavedWord).userSentence || "");
   const [isEditing, setIsEditing] = useState(!((data as SavedWord).userSentence));
   const [isSaving, setIsSaving] = useState(false);
@@ -20,9 +23,14 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
   const handleSave = async () => {
     if (!onUpdatePractice || !practiceText.trim()) return;
     setIsSaving(true);
-    await onUpdatePractice(practiceText);
-    setIsSaving(false);
-    setIsEditing(false);
+    try {
+      await onUpdatePractice(practiceText);
+      setIsEditing(false);
+    } catch (e) {
+      console.error("Failed to save practice", e);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -39,7 +47,7 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
       </div>
       
       <div className="p-6 space-y-6 bg-white">
-        {data.examples.map((ex, idx) => (
+        {data.examples && data.examples.map((ex, idx) => (
           <div key={idx} className="group">
             <div className="flex items-center gap-2 mb-1.5">
               <span className="text-[9px] font-black text-slate-300 group-hover:text-indigo-400 transition-colors uppercase tracking-widest">{ex.category.split('(')[0].trim()}</span>

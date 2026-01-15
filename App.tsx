@@ -55,7 +55,11 @@ const App: React.FC = () => {
       if (storedMessages) {
         try {
           const parsed = JSON.parse(storedMessages);
-          if (parsed.length > 0) setMessages(parsed); else showWelcome();
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setMessages(parsed);
+          } else {
+            showWelcome();
+          }
         } catch (e) { showWelcome(); }
       } else { showWelcome(); }
 
@@ -150,7 +154,8 @@ const App: React.FC = () => {
   };
 
   const saveLocalOnly = (details: WordDetail) => {
-    const newSaved: SavedWord = { ...details, id: Date.now().toString(), savedAt: Date.now() };
+    const newId = Date.now().toString();
+    const newSaved: SavedWord = { ...details, id: newId, savedAt: Date.now() };
     setSavedWords(prev => {
       const exists = prev.find(w => w.word.toLowerCase() === details.word.toLowerCase());
       if (exists) return prev;
@@ -173,26 +178,31 @@ const App: React.FC = () => {
   };
 
   const updateUserPractice = async (wordId: string, sentence: string) => {
-    const updatedWords = savedWords.map(w => w.id === wordId ? { ...w, userSentence: sentence } : w);
-    setSavedWords(updatedWords);
+    if (!wordId) return;
+
+    // 1. Update Saved Words State
+    setSavedWords(prev => prev.map(w => w.id === wordId ? { ...w, userSentence: sentence } : w));
     
-    // Update Supabase if word exists there
-    const word = updatedWords.find(w => w.id === wordId);
-    if (word && db.isSupabaseConfigured()) {
-      await db.saveWordToDB(word);
+    // 2. Update Supabase if word exists there
+    if (db.isSupabaseConfigured()) {
+      const wordToSync = savedWords.find(w => w.id === wordId);
+      if (wordToSync) {
+        await db.saveWordToDB({ ...wordToSync, userSentence: sentence });
+      }
     }
 
-    // Update messages if the word is being displayed in chat
+    // 3. Update Chat Messages History (Safety improved)
     setMessages(prev => prev.map(msg => {
-      if (typeof msg.content === 'object' && (msg.content as SavedWord).id === wordId) {
-        return { ...msg, content: { ...msg.content, userSentence: sentence } };
+      const content = msg.content;
+      if (content && typeof content === 'object' && 'id' in content && content.id === wordId) {
+        return { ...msg, content: { ...content, userSentence: sentence } as SavedWord };
       }
       return msg;
     }));
 
-    // Update selected word if open
+    // 4. Update selected word if open
     if (selectedWord?.id === wordId) {
-      setSelectedWord({ ...selectedWord, userSentence: sentence });
+      setSelectedWord(prev => prev ? { ...prev, userSentence: sentence } : null);
     }
   };
 
@@ -252,7 +262,7 @@ const App: React.FC = () => {
             {messages.map((msg) => (
               <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
                 <div className={`max-w-[90%] ${msg.role === 'user' ? 'order-2' : ''}`}>
-                  {msg.role === 'assistant' && typeof msg.content === 'object' ? (
+                  {msg.role === 'assistant' && msg.content && typeof msg.content === 'object' && 'word' in msg.content ? (
                     <WordDetailCard 
                       data={msg.content as SavedWord} 
                       onUpdatePractice={(s) => updateUserPractice((msg.content as SavedWord).id, s)}
