@@ -386,9 +386,6 @@ const App: React.FC = () => {
                     onUpdatePractice={(s) => updateUserPractice(selectedWord.id, s)}
                   />
                   <div className="mt-8 flex flex-col gap-3">
-                    <button onClick={() => { setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: selectedWord, timestamp: Date.now() }]); setSelectedWord(null); setActiveTab('chat'); }} className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-3">
-                      <i className="fa-solid fa-comment-dots"></i> Show in Chat History
-                    </button>
                     <button onClick={() => setSelectedWord(null)} className="w-full py-5 bg-white text-slate-400 rounded-[2rem] font-black text-sm uppercase tracking-widest border border-slate-200 active:scale-95 transition-all">Close Detail</button>
                   </div>
                 </div>
