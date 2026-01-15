@@ -120,18 +120,17 @@ const App: React.FC = () => {
 
     try {
       const details = await getWordDetails(query);
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: details,
-        timestamp: Date.now()
-      };
       
-      setMessages(prev => [...prev, assistantMessage]);
-
       if (db.isSupabaseConfigured()) {
         const saved = await db.saveWordToDB(details);
         if (saved) {
+          const assistantMessage: ChatMessage = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: saved,
+            timestamp: Date.now()
+          };
+          setMessages(prev => [...prev, assistantMessage]);
           setSavedWords(prev => [saved, ...prev.filter(w => w.word.toLowerCase() !== details.word.toLowerCase())]);
         } else {
           saveLocalOnly(details);
@@ -151,11 +150,18 @@ const App: React.FC = () => {
   };
 
   const saveLocalOnly = (details: WordDetail) => {
+    const newSaved: SavedWord = { ...details, id: Date.now().toString(), savedAt: Date.now() };
     setSavedWords(prev => {
       const exists = prev.find(w => w.word.toLowerCase() === details.word.toLowerCase());
       if (exists) return prev;
-      return [{ ...details, id: Date.now().toString(), savedAt: Date.now() }, ...prev];
+      return [newSaved, ...prev];
     });
+    setMessages(prev => [...prev, {
+      id: (Date.now() + 1).toString(),
+      role: 'assistant',
+      content: newSaved,
+      timestamp: Date.now()
+    }]);
   };
 
   const removeWord = async (id: string) => {
@@ -164,6 +170,30 @@ const App: React.FC = () => {
     }
     setSavedWords(prev => prev.filter(w => w.id !== id));
     if (selectedWord?.id === id) setSelectedWord(null);
+  };
+
+  const updateUserPractice = async (wordId: string, sentence: string) => {
+    const updatedWords = savedWords.map(w => w.id === wordId ? { ...w, userSentence: sentence } : w);
+    setSavedWords(updatedWords);
+    
+    // Update Supabase if word exists there
+    const word = updatedWords.find(w => w.id === wordId);
+    if (word && db.isSupabaseConfigured()) {
+      await db.saveWordToDB(word);
+    }
+
+    // Update messages if the word is being displayed in chat
+    setMessages(prev => prev.map(msg => {
+      if (typeof msg.content === 'object' && (msg.content as SavedWord).id === wordId) {
+        return { ...msg, content: { ...msg.content, userSentence: sentence } };
+      }
+      return msg;
+    }));
+
+    // Update selected word if open
+    if (selectedWord?.id === wordId) {
+      setSelectedWord({ ...selectedWord, userSentence: sentence });
+    }
   };
 
   const saveSettings = async () => {
@@ -223,7 +253,10 @@ const App: React.FC = () => {
               <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
                 <div className={`max-w-[90%] ${msg.role === 'user' ? 'order-2' : ''}`}>
                   {msg.role === 'assistant' && typeof msg.content === 'object' ? (
-                    <WordDetailCard data={msg.content} />
+                    <WordDetailCard 
+                      data={msg.content as SavedWord} 
+                      onUpdatePractice={(s) => updateUserPractice((msg.content as SavedWord).id, s)}
+                    />
                   ) : (
                     <div className={`px-5 py-3.5 rounded-2xl shadow-sm ${
                       msg.role === 'user' 
@@ -313,7 +346,10 @@ const App: React.FC = () => {
               </div>
               <div className="flex-1 overflow-y-auto custom-scrollbar px-6 pb-20">
                 <div className="max-w-xl mx-auto py-6">
-                  <WordDetailCard data={selectedWord} />
+                  <WordDetailCard 
+                    data={selectedWord} 
+                    onUpdatePractice={(s) => updateUserPractice(selectedWord.id, s)}
+                  />
                   <div className="mt-8 flex flex-col gap-3">
                     <button onClick={() => { setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: selectedWord, timestamp: Date.now() }]); setSelectedWord(null); setActiveTab('chat'); }} className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-3">
                       <i className="fa-solid fa-comment-dots"></i> Show in Chat History

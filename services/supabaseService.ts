@@ -10,7 +10,7 @@ export const isSupabaseConfigured = () => {
 };
 
 export const setSupabaseConfig = (url: string, key: string, id: string) => {
-  const cleanUrl = url.trim().replace(/\/$/, ""); // 트레일링 슬래시 제거
+  const cleanUrl = url.trim().replace(/\/$/, ""); 
   localStorage.setItem('supabase_url', cleanUrl);
   localStorage.setItem('supabase_key', key.trim());
   localStorage.setItem('supabase_user_id', id.trim());
@@ -53,6 +53,7 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[]> => {
       word: item.word,
       nuance: item.nuance,
       examples: item.examples,
+      userSentence: item.user_sentence,
       savedAt: new Date(item.created_at).getTime()
     }));
   } catch (error) {
@@ -61,39 +62,52 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[]> => {
   }
 };
 
-export const saveWordToDB = async (word: WordDetail): Promise<SavedWord | null> => {
+export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedWord | null> => {
   if (!isSupabaseConfigured()) return null;
   try {
-    // 중복 체크: 이미 해당 유저가 이 단어를 가지고 있는지 확인
     const checkRes = await fetch(`${supabaseUrl}/rest/v1/saved_words?user_id=eq.${userId}&word=eq.${word.word}`, {
       method: "GET",
       headers: headers()
     });
     const existing = await checkRes.json();
+    
+    const payload = {
+      word: word.word,
+      nuance: word.nuance,
+      examples: word.examples,
+      user_sentence: (word as SavedWord).userSentence || null,
+      user_id: userId
+    };
+
     if (existing && existing.length > 0) {
-      // 이미 있으면 해당 정보 반환 (업데이트는 필요시 추가)
-      return {
-        ...word,
-        id: existing[0].id,
-        savedAt: new Date(existing[0].created_at).getTime()
-      };
+      // Update existing
+      const updateRes = await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${existing[0].id}`, {
+        method: "PATCH",
+        headers: headers(),
+        body: JSON.stringify(payload)
+      });
+      const updated = await updateRes.json();
+      if (updated && updated[0]) {
+        return {
+          ...word,
+          id: updated[0].id,
+          userSentence: updated[0].user_sentence,
+          savedAt: new Date(updated[0].created_at).getTime()
+        };
+      }
     }
 
     const res = await fetch(`${supabaseUrl}/rest/v1/saved_words`, {
       method: "POST",
       headers: headers(),
-      body: JSON.stringify({
-        word: word.word,
-        nuance: word.nuance,
-        examples: word.examples,
-        user_id: userId
-      })
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (data && data[0]) {
       return {
         ...word,
         id: data[0].id,
+        userSentence: data[0].user_sentence,
         savedAt: new Date(data[0].created_at).getTime()
       };
     }
@@ -107,7 +121,6 @@ export const saveWordToDB = async (word: WordDetail): Promise<SavedWord | null> 
 export const deleteWordFromDB = async (id: string) => {
   if (!isSupabaseConfigured()) return;
   try {
-    // Supabase ID는 보통 UUID 형식이므로 숫자로만 된 로컬 ID는 걸러냄
     if (id.length > 15) {
       await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${id}`, {
         method: "DELETE",
@@ -122,7 +135,6 @@ export const deleteWordFromDB = async (id: string) => {
 export const uploadLocalWords = async (localWords: SavedWord[]): Promise<number> => {
   if (!isSupabaseConfigured() || localWords.length === 0) return 0;
   let count = 0;
-  // 병렬 처리를 위해 Promise.all 사용 가능하지만 안정성을 위해 순차 처리 또는 최적화
   for (const word of localWords) {
     const saved = await saveWordToDB(word);
     if (saved) count++;

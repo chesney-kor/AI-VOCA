@@ -14,17 +14,18 @@ export interface WordDetail {
 export interface SavedWord extends WordDetail {
   id: string;
   savedAt: number;
+  userSentence?: string;
 }
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
-  content: string | WordDetail;
+  content: string | WordDetail | SavedWord;
   timestamp: number;
 }
 
 export interface QuizQuestion {
-  sentence: string; // The sentence with a blank ____
+  sentence: string;
   correctWord: string;
   options: string[];
 }
