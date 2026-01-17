@@ -194,39 +194,51 @@ const App: React.FC = () => {
     if (!wordId) return;
 
     // Find the word name to sync all instances of this word
-    const targetWordObj = savedWords.find(w => w.id === wordId);
-    const targetWordName = targetWordObj?.word.toLowerCase();
+    // We look for the word name in savedWords first, then fallback to messages
+    let targetWordName: string | undefined;
+    const vocabMatch = savedWords.find(w => w.id === wordId);
+    if (vocabMatch) {
+      targetWordName = vocabMatch.word.toLowerCase();
+    } else {
+      for (const m of messages) {
+        if (typeof m.content === 'object' && 'word' in m.content && (m.content as SavedWord).id === wordId) {
+          targetWordName = (m.content as SavedWord).word.toLowerCase();
+          break;
+        }
+      }
+    }
 
-    // 1. Update Saved Words State (Sync by ID and Word Name)
+    if (!targetWordName) return;
+
+    // 1. Update Saved Words State (Sync all instances with the same word name)
     setSavedWords(prev => prev.map(w => 
-      (w.id === wordId || (targetWordName && w.word.toLowerCase() === targetWordName))
+      (w.word.toLowerCase() === targetWordName)
         ? { ...w, userSentence: sentence } 
         : w
     ));
     
     // 2. Update Supabase if word exists there
-    if (db.isSupabaseConfigured() && targetWordObj) {
-      await db.saveWordToDB({ ...targetWordObj, userSentence: sentence });
+    if (db.isSupabaseConfigured()) {
+      const wordToSync = savedWords.find(w => w.word.toLowerCase() === targetWordName);
+      if (wordToSync) {
+        await db.saveWordToDB({ ...wordToSync, userSentence: sentence });
+      }
     }
 
-    // 3. Update ALL Chat Messages with this word (Synchronize Search and Vocab)
+    // 3. Update ALL Chat Messages with this word name (Synchronize Search results and Vocab)
     setMessages(prev => prev.map(msg => {
       const content = msg.content;
       if (content && typeof content === 'object' && 'word' in content) {
-        // Correctly handle property access on WordDetail | SavedWord union by using type-safe checks
-        const wordContent = content as (WordDetail | SavedWord);
-        const msgWord = wordContent.word.toLowerCase();
-        const msgId = 'id' in wordContent ? (wordContent as SavedWord).id : undefined;
-
-        if (msgId === wordId || (targetWordName && msgWord === targetWordName)) {
+        const msgWord = (content as (WordDetail | SavedWord)).word.toLowerCase();
+        if (msgWord === targetWordName) {
           return { ...msg, content: { ...content, userSentence: sentence } as SavedWord };
         }
       }
       return msg;
     }));
 
-    // 4. Update selected word if it's currently open
-    if (selectedWord && (selectedWord.id === wordId || (targetWordName && selectedWord.word.toLowerCase() === targetWordName))) {
+    // 4. Update selected word if it matches the word being edited
+    if (selectedWord && selectedWord.word.toLowerCase() === targetWordName) {
       setSelectedWord(prev => prev ? { ...prev, userSentence: sentence } : null);
     }
   };
@@ -386,9 +398,6 @@ const App: React.FC = () => {
                     onUpdatePractice={(s) => updateUserPractice(selectedWord.id, s)}
                   />
                   <div className="mt-8 flex flex-col gap-3">
-                    <button onClick={() => { setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: selectedWord, timestamp: Date.now() }]); setSelectedWord(null); setActiveTab('chat'); }} className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-3">
-                      <i className="fa-solid fa-comment-dots"></i> Show in Chat History
-                    </button>
                     <button onClick={() => setSelectedWord(null)} className="w-full py-5 bg-white text-slate-400 rounded-[2rem] font-black text-sm uppercase tracking-widest border border-slate-200 active:scale-95 transition-all">Close Detail</button>
                   </div>
                 </div>
