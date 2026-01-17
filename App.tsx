@@ -16,12 +16,14 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   
+  // Touch coordinates for swipe
+  const touchStartX = useRef<number | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
   // DB Config State
   const [dbUrl, setDbUrl] = useState(localStorage.getItem('supabase_url') || "");
   const [dbKey, setDbKey] = useState(localStorage.getItem('supabase_key') || "");
   const [dbUserId, setDbUserId] = useState(localStorage.getItem('supabase_user_id') || "my_lexicon_user");
-
-  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   // Sync with Cloud
   const syncWithCloud = useCallback(async (localData: SavedWord[]) => {
@@ -193,8 +195,6 @@ const App: React.FC = () => {
   const updateUserPractice = async (wordId: string, sentence: string) => {
     if (!wordId) return;
 
-    // Find the word name to sync all instances of this word
-    // We look for the word name in savedWords first, then fallback to messages
     let targetWordName: string | undefined;
     const vocabMatch = savedWords.find(w => w.id === wordId);
     if (vocabMatch) {
@@ -210,14 +210,14 @@ const App: React.FC = () => {
 
     if (!targetWordName) return;
 
-    // 1. Update Saved Words State (Sync all instances with the same word name)
+    // Sync all occurrences (Vocab list)
     setSavedWords(prev => prev.map(w => 
       (w.word.toLowerCase() === targetWordName)
         ? { ...w, userSentence: sentence } 
         : w
     ));
     
-    // 2. Update Supabase if word exists there
+    // Sync to Cloud
     if (db.isSupabaseConfigured()) {
       const wordToSync = savedWords.find(w => w.word.toLowerCase() === targetWordName);
       if (wordToSync) {
@@ -225,11 +225,12 @@ const App: React.FC = () => {
       }
     }
 
-    // 3. Update ALL Chat Messages with this word name (Synchronize Search results and Vocab)
+    // Sync Search results (Messages)
     setMessages(prev => prev.map(msg => {
       const content = msg.content;
       if (content && typeof content === 'object' && 'word' in content) {
-        const msgWord = (content as (WordDetail | SavedWord)).word.toLowerCase();
+        const wordContent = content as (WordDetail | SavedWord);
+        const msgWord = wordContent.word.toLowerCase();
         if (msgWord === targetWordName) {
           return { ...msg, content: { ...content, userSentence: sentence } as SavedWord };
         }
@@ -237,11 +238,43 @@ const App: React.FC = () => {
       return msg;
     }));
 
-    // 4. Update selected word if it matches the word being edited
+    // Sync Current Selected View
     if (selectedWord && selectedWord.word.toLowerCase() === targetWordName) {
       setSelectedWord(prev => prev ? { ...prev, userSentence: sentence } : null);
     }
   };
+
+  // --- SWIPE LOGIC START ---
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // If user is interacting with a textarea, don't initiate swipe
+    if ((e.target as HTMLElement).tagName === 'TEXTAREA') return;
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null || !selectedWord) return;
+    
+    const touchEndX = e.changedTouches[0].clientX;
+    const deltaX = touchEndX - touchStartX.current;
+    const threshold = 70; // Minimum distance to trigger swipe
+
+    if (Math.abs(deltaX) > threshold) {
+      const currentIndex = savedWords.findIndex(w => w.id === selectedWord.id);
+      if (deltaX < 0) {
+        // Swipe Left -> Next Word
+        if (currentIndex < savedWords.length - 1) {
+          setSelectedWord(savedWords[currentIndex + 1]);
+        }
+      } else {
+        // Swipe Right -> Previous Word
+        if (currentIndex > 0) {
+          setSelectedWord(savedWords[currentIndex - 1]);
+        }
+      }
+    }
+    touchStartX.current = null;
+  };
+  // --- SWIPE LOGIC END ---
 
   const saveSettings = async () => {
     db.setSupabaseConfig(dbUrl, dbKey, dbUserId);
@@ -382,18 +415,31 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Word Detail Overlay */}
+        {/* Word Detail Overlay with Swipe Navigation */}
         {selectedWord && (
-          <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm flex items-end justify-center animate-in fade-in duration-300">
+          <div 
+            className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm flex items-end justify-center animate-in fade-in duration-300"
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+          >
             <div className="bg-slate-50 w-full max-w-2xl h-[90%] rounded-t-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-full duration-500">
               <div className="px-8 pt-8 pb-4 flex justify-between items-center">
                 <button onClick={() => setSelectedWord(null)} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-indigo-600 shadow-sm transition-all active:scale-90"><i className="fa-solid fa-arrow-left"></i></button>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Detail View</span>
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Detail View</span>
+                  <div className="flex gap-1 mt-1">
+                    {savedWords.map((w, i) => (
+                      <div key={w.id} className={`w-1 h-1 rounded-full ${w.id === selectedWord.id ? 'bg-indigo-600 w-3' : 'bg-slate-200'} transition-all`}></div>
+                    ))}
+                  </div>
+                </div>
                 <button onClick={() => removeWord(selectedWord.id)} className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center text-rose-500 shadow-sm transition-all active:scale-90"><i className="fa-solid fa-trash-can"></i></button>
               </div>
               <div className="flex-1 overflow-y-auto custom-scrollbar px-6 pb-20">
                 <div className="max-w-xl mx-auto py-6">
+                  {/* key={selectedWord.id} to trigger enter animation on swipe */}
                   <WordDetailCard 
+                    key={selectedWord.id}
                     data={selectedWord} 
                     onUpdatePractice={(s) => updateUserPractice(selectedWord.id, s)}
                   />
