@@ -12,7 +12,7 @@ const App: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [savedWords, setSavedWords] = useState<SavedWord[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false); // 초기 로딩 완료 여부
+  const [isLoaded, setIsLoaded] = useState(false); 
   const [selectedWord, setSelectedWord] = useState<SavedWord | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -25,7 +25,6 @@ const App: React.FC = () => {
   const [dbKey, setDbKey] = useState(localStorage.getItem('supabase_key') || "");
   const [dbUserId, setDbUserId] = useState(localStorage.getItem('supabase_user_id') || "lexi_user_shared");
 
-  // 동기화 함수: 로컬과 클라우드 데이터를 안전하게 합침
   const syncWithCloud = useCallback(async (localData: SavedWord[]): Promise<SavedWord[]> => {
     if (!db.isSupabaseConfigured()) return localData;
     setIsSyncing(true);
@@ -34,7 +33,6 @@ const App: React.FC = () => {
     try {
       const fetched = await db.fetchWordsFromDB();
       
-      // 서버 에러(null)인 경우 로컬 데이터 유지
       if (fetched === null) {
         setSyncStatus("Sync Failed");
         setTimeout(() => setSyncStatus(null), 3000);
@@ -44,19 +42,16 @@ const App: React.FC = () => {
 
       const cloudWords: SavedWord[] = fetched;
       const cloudWordNames = new Set(cloudWords.map(w => w.word.toLowerCase()));
-      
-      // 로컬에만 있는 단어 추출
       const localOnlyWords = localData.filter(w => !cloudWordNames.has(w.word.toLowerCase()));
       
       if (localOnlyWords.length > 0) {
-        setSyncStatus(`Uploading ${localOnlyWords.length} words...`);
+        setSyncStatus(`Uploading ${localOnlyWords.length} items...`);
         await db.uploadLocalWords(localOnlyWords);
-        // 업로드 후 다시 불러오기
         const refetched = await db.fetchWordsFromDB();
         setIsSyncing(false);
         setSyncStatus("Synced");
         setTimeout(() => setSyncStatus(null), 2000);
-        return refetched && refetched.length > 0 ? refetched : [...cloudWords, ...localOnlyWords];
+        return (refetched && refetched.length > 0) ? refetched : [...cloudWords, ...localOnlyWords];
       }
       
       setIsSyncing(false);
@@ -64,15 +59,14 @@ const App: React.FC = () => {
       setTimeout(() => setSyncStatus(null), 2000);
       return cloudWords;
     } catch (e) {
-      console.error("Sync error:", e);
-      setSyncStatus("Sync Error");
+      console.error("Sync Error:", e);
+      setSyncStatus("Error");
       setTimeout(() => setSyncStatus(null), 3000);
       setIsSyncing(false);
       return localData;
     }
   }, []);
 
-  // 초기화 로직
   useEffect(() => {
     const initData = async () => {
       // 1. 메시지 복원
@@ -80,9 +74,8 @@ const App: React.FC = () => {
       if (storedMessages) {
         try {
           const parsed = JSON.parse(storedMessages);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setMessages(parsed);
-          } else { showWelcome(); }
+          if (Array.isArray(parsed) && parsed.length > 0) setMessages(parsed);
+          else showWelcome();
         } catch (e) { showWelcome(); }
       } else { showWelcome(); }
 
@@ -92,7 +85,7 @@ const App: React.FC = () => {
       if (storedWords) {
         try { 
           const parsed = JSON.parse(storedWords);
-          if (Array.isArray(parsed)) localWords = parsed;
+          if (Array.isArray(parsed) && parsed.length > 0) localWords = parsed;
         } catch (e) {}
       }
       
@@ -104,8 +97,7 @@ const App: React.FC = () => {
         setSavedWords(localWords);
       }
       
-      // 4. 로딩 완료 설정 (이 시점 이후부터 localStorage 저장이 활성화됨)
-      setIsLoaded(true);
+      setIsLoaded(true); // 로딩 완료 플래그 활성화
     };
     initData();
   }, [syncWithCloud]);
@@ -119,14 +111,13 @@ const App: React.FC = () => {
     }]);
   };
 
-  // 단어장 변경 시 로컬 저장 (데이터 소실 방지 가드 포함)
   useEffect(() => {
+    // 로딩이 완전히 끝난(isLoaded === true) 상태에서만 localStorage 갱신
     if (isLoaded) {
       localStorage.setItem('efl_lexicon_saved', JSON.stringify(savedWords));
     }
   }, [savedWords, isLoaded]);
 
-  // 메시지 변경 시 로컬 저장
   useEffect(() => {
     if (isLoaded && messages.length > 0) {
       localStorage.setItem('efl_chat_history', JSON.stringify(messages));
@@ -166,7 +157,6 @@ const App: React.FC = () => {
           setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: saved, timestamp: Date.now() }]);
           setSavedWords(prev => [saved, ...prev.filter(w => w.word.toLowerCase() !== details.word.toLowerCase())]);
         } else {
-          // 서버 저장 실패 시 로컬에라도 저장
           saveLocalOnly(wordToSave);
         }
       } else {
@@ -179,7 +169,7 @@ const App: React.FC = () => {
 
   const saveLocalOnly = (details: WordDetail | SavedWord) => {
     const existing = savedWords.find(w => w.word.toLowerCase() === details.word.toLowerCase());
-    const newId = existing ? existing.id : Date.now().toString();
+    const newId = existing ? existing.id : `local_${Date.now()}`;
     const newSaved: SavedWord = { 
       ...details, 
       id: newId, 
