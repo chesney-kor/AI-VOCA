@@ -78,7 +78,7 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
     const encodedUserId = encodeURIComponent(userId);
     const encodedWord = encodeURIComponent(word.word);
     
-    // 1. 기존 데이터 확인 (중복 방지)
+    // 1. 중복 확인
     const checkRes = await fetch(`${supabaseUrl}/rest/v1/saved_words?user_id=eq.${encodedUserId}&word=eq.${encodedWord}`, {
       method: "GET",
       headers: headers()
@@ -89,25 +89,25 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
       existing = await checkRes.json();
     }
 
-    // 2. 페이로드 준비
+    // 2. 페이로드 (서버 컬럼명과 정확히 일치해야 함)
     const payload = {
       word: word.word,
       nuance: word.nuance,
-      examples: Array.isArray(word.examples) ? word.examples : [],
+      examples: Array.isArray(word.examples) ? word.examples : [], // jsonb
       user_sentence: (word as SavedWord).userSentence || null,
       user_id: userId
     };
 
     let res;
     if (Array.isArray(existing) && existing.length > 0) {
-      // UPDATE
+      // PATCH (업데이트)
       res = await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${existing[0].id}`, {
         method: "PATCH",
         headers: headers(),
         body: JSON.stringify(payload)
       });
     } else {
-      // INSERT
+      // POST (신규 저장)
       res = await fetch(`${supabaseUrl}/rest/v1/saved_words`, {
         method: "POST",
         headers: headers(),
@@ -117,10 +117,10 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
 
     if (!res.ok) {
       const errorDetail = await res.text();
-      console.group("Supabase 400 Error Debug");
-      console.error("Status:", res.status);
-      console.error("Message:", errorDetail);
-      console.log("Sent Payload:", payload);
+      console.group("Supabase Error 400 Debugging");
+      console.error("HTTP Status:", res.status);
+      console.error("Error Message:", errorDetail);
+      console.log("Check if these columns exist in Supabase: word(text), nuance(text), examples(jsonb), user_sentence(text), user_id(text)");
       console.groupEnd();
       return null;
     }
@@ -145,6 +145,7 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
 export const deleteWordFromDB = async (id: string) => {
   if (!isSupabaseConfigured()) return;
   try {
+    // 임시 로컬 ID는 삭제 요청 안함
     if (id && id.length > 15 && !id.startsWith('local_')) {
       await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${id}`, {
         method: "DELETE",
