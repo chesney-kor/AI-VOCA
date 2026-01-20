@@ -24,7 +24,7 @@ const App: React.FC = () => {
   const [dbKey, setDbKey] = useState(localStorage.getItem('supabase_key') || "");
   const [dbUserId, setDbUserId] = useState(localStorage.getItem('supabase_user_id') || "lexi_user_shared");
 
-  const syncWithCloud = useCallback(async (localData: SavedWord[]) => {
+  const syncWithCloud = useCallback(async (localData: SavedWord[]): Promise<SavedWord[]> => {
     if (!db.isSupabaseConfigured()) return localData;
     setIsSyncing(true);
     setSyncStatus("Syncing...");
@@ -57,7 +57,7 @@ const App: React.FC = () => {
       setIsSyncing(false);
       setSyncStatus("Synced");
       setTimeout(() => setSyncStatus(null), 2000);
-      return cloudWords.length > 0 ? cloudWords : localData;
+      return cloudWords;
     } catch (e) {
       console.error("Sync error:", e);
       setSyncStatus("Error");
@@ -279,7 +279,7 @@ const App: React.FC = () => {
               <h2 className="text-xl font-black text-slate-900 tracking-tight">Vocabulary</h2>
               {db.isSupabaseConfigured() && (
                 <button 
-                  onClick={() => syncWithCloud(savedWords).then(setSavedWords)} 
+                  onClick={() => syncWithCloud(savedWords).then(result => setSavedWords(result))} 
                   disabled={isSyncing} 
                   className="text-[11px] font-black text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full flex items-center gap-1.5 active:scale-95 transition-all uppercase tracking-wider"
                 >
