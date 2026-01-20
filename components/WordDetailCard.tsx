@@ -19,29 +19,37 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [cachedKeys, setCachedKeys] = useState<Set<string>>(new Set());
 
-  // 데이터 로드 시 백그라운드 캐싱 트리거
+  // 데이터 로드 시 백그라운드 캐싱 트리거 (최적화 버전)
   useEffect(() => {
     const prefetch = async () => {
-      const mainText = `The word is ${data.word}. The nuance is: ${data.nuance}`;
-      // 캐시 존재 여부 확인
+      // 1. 메인 단어 (긴 뉘앙스 설명 제외하고 단어만!)
+      const mainWordOnly = data.word;
+      
       const checkCache = async (text: string, id: string) => {
         const key = `tts_${text.slice(0, 50)}_${text.length}`;
-        const data = await getCachedAudio(key);
-        if (data) setCachedKeys(prev => new Set(prev).add(id));
-        return !!data;
+        const cached = await getCachedAudio(key);
+        if (cached) {
+          setCachedKeys(prev => new Set(prev).add(id));
+          return true;
+        }
+        return false;
       };
 
-      await checkCache(mainText, 'main-word');
-      
-      // 메인 단어 캐싱 시도
-      await cacheSpeech(mainText);
-      setCachedKeys(prev => new Set(prev).add('main-word'));
+      // 메인 단어 캐시 확인 및 생성
+      const isMainCached = await checkCache(mainWordOnly, 'main-word');
+      if (!isMainCached) {
+        await cacheSpeech(mainWordOnly);
+        setCachedKeys(prev => new Set(prev).add('main-word'));
+      }
 
-      // 첫 번째 예문도 미리 캐싱
+      // 2. 첫 번째 예문만 사전 캐싱 (리소스 절약 및 속도 향상)
       if (data.examples && data.examples[0]) {
-        await checkCache(data.examples[0].sentence, 'ex-0');
-        await cacheSpeech(data.examples[0].sentence);
-        setCachedKeys(prev => new Set(prev).add('ex-0'));
+        const firstEx = data.examples[0].sentence;
+        const isExCached = await checkCache(firstEx, 'ex-0');
+        if (!isExCached) {
+          await cacheSpeech(firstEx);
+          setCachedKeys(prev => new Set(prev).add('ex-0'));
+        }
       }
     };
 
@@ -55,10 +63,10 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
     
     try {
       setPlayingId(id);
+      // 이미 캐시되어 있다면 generatingId가 설정되지 않아 즉시 재생되는 느낌을 줌
       await playSpeech(text, () => {
         setGeneratingId(id);
       });
-      // 성공적으로 재생/생성 후 캐시 상태 업데이트
       setCachedKeys(prev => new Set(prev).add(id));
     } catch (e) {
       console.error(e);
@@ -87,21 +95,24 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
     <div className="bg-white rounded-[2rem] shadow-lg border border-slate-200/60 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="p-5 border-b border-slate-100 bg-gradient-to-br from-indigo-50/20 to-white">
         <div className="flex justify-between items-start mb-3">
-          <h2 className="text-2xl font-black text-indigo-700 uppercase tracking-tighter">{data.word}</h2>
+          <div className="flex flex-col">
+            <h2 className="text-2xl font-black text-indigo-700 uppercase tracking-tighter">{data.word}</h2>
+            <span className="text-[10px] font-bold text-slate-400">Click speaker to hear pronunciation</span>
+          </div>
           <button 
-            onClick={() => handlePlay(`The word is ${data.word}. The nuance is: ${data.nuance}`, 'main-word')}
+            onClick={() => handlePlay(data.word, 'main-word')}
             disabled={isAnyActionActive}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-sm active:scale-90 ${
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all shadow-md active:scale-90 ${
               generatingId === 'main-word' ? 'bg-amber-500 text-white animate-bounce' : 
               playingId === 'main-word' ? 'bg-indigo-600 text-white animate-pulse' : 
-              cachedKeys.has('main-word') ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-white text-slate-300'
+              cachedKeys.has('main-word') ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-slate-50 text-slate-300'
             }`}
           >
             <i className={`fa-solid ${
               generatingId === 'main-word' ? 'fa-wand-magic-sparkles' : 
               playingId === 'main-word' ? 'fa-volume-high' : 
-              cachedKeys.has('main-word') ? 'fa-volume-low' : 'fa-volume-xmark opacity-30'
-            }`}></i>
+              'fa-volume-low'
+            } text-lg`}></i>
           </button>
         </div>
         <div className="bg-white/80 p-3.5 rounded-xl border border-indigo-100 shadow-sm relative overflow-hidden">
@@ -125,16 +136,16 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
                 <button 
                   onClick={() => handlePlay(ex.sentence, `ex-${idx}`)}
                   disabled={isAnyActionActive}
-                  className={`p-1.5 rounded-lg transition-all ${
-                    isGenerating ? 'text-amber-500 animate-spin' :
-                    isPlaying ? 'text-indigo-600 animate-pulse' : 
-                    isCached ? 'text-indigo-400' : 'text-slate-200 hover:text-indigo-300'
+                  className={`p-2 rounded-lg transition-all ${
+                    isGenerating ? 'text-amber-500 animate-spin bg-amber-50' :
+                    isPlaying ? 'text-indigo-600 animate-pulse bg-indigo-50' : 
+                    isCached ? 'text-indigo-400 bg-slate-50/50' : 'text-slate-200 hover:text-indigo-300'
                   }`}
                 >
                   <i className={`fa-solid ${
                     isGenerating ? 'fa-arrows-rotate' : 
                     isPlaying ? 'fa-circle-play' : 
-                    isCached ? 'fa-volume-low text-[10px]' : 'fa-volume-xmark text-[10px] opacity-20'
+                    'fa-volume-low text-[11px]'
                   }`}></i>
                 </button>
               </div>
@@ -152,23 +163,23 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
 
         <div className="mt-4 pt-4 border-t border-dashed border-slate-100">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">My Context</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">My Practice</span>
             {!isEditing && onUpdatePractice && (
               <div className="flex items-center gap-2">
                 {practiceText && (
                   <button 
                     onClick={() => handlePlay(practiceText, 'user-practice')}
                     disabled={isAnyActionActive}
-                    className={`text-[10px] transition-all ${
+                    className={`p-1.5 rounded-lg transition-all ${
                       generatingId === 'user-practice' ? 'text-amber-500 animate-spin' :
                       playingId === 'user-practice' ? 'text-indigo-600 animate-pulse' : 
-                      cachedKeys.has('user-practice') ? 'text-indigo-500' : 'text-slate-300'
+                      cachedKeys.has('user-practice') ? 'text-indigo-500 bg-indigo-50' : 'text-slate-300'
                     }`}
                   >
-                    <i className={`fa-solid ${generatingId === 'user-practice' ? 'fa-arrows-rotate' : 'fa-volume-low'}`}></i>
+                    <i className={`fa-solid ${generatingId === 'user-practice' ? 'fa-arrows-rotate' : 'fa-volume-low text-[10px]'}`}></i>
                   </button>
                 )}
-                <button onClick={() => setIsEditing(true)} className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Edit</button>
+                <button onClick={() => setIsEditing(true)} className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest px-2 py-1 bg-indigo-50 rounded-md">Edit</button>
               </div>
             )}
           </div>
