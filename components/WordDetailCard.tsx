@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { WordDetail, SavedWord } from '../types';
-import { playSpeech } from '../services/geminiService';
+import { playSpeech, cacheSpeech } from '../services/geminiService';
+import { getCachedAudio } from '../services/audioCacheService';
 
 interface WordDetailCardProps {
   data: WordDetail | SavedWord;
@@ -16,8 +17,35 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
   const [isSaving, setIsSaving] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [cachedKeys, setCachedKeys] = useState<Set<string>>(new Set());
 
+  // 데이터 로드 시 백그라운드 캐싱 트리거
   useEffect(() => {
+    const prefetch = async () => {
+      const mainText = `The word is ${data.word}. The nuance is: ${data.nuance}`;
+      // 캐시 존재 여부 확인
+      const checkCache = async (text: string, id: string) => {
+        const key = `tts_${text.slice(0, 50)}_${text.length}`;
+        const data = await getCachedAudio(key);
+        if (data) setCachedKeys(prev => new Set(prev).add(id));
+        return !!data;
+      };
+
+      await checkCache(mainText, 'main-word');
+      
+      // 메인 단어 캐싱 시도
+      await cacheSpeech(mainText);
+      setCachedKeys(prev => new Set(prev).add('main-word'));
+
+      // 첫 번째 예문도 미리 캐싱
+      if (data.examples && data.examples[0]) {
+        await checkCache(data.examples[0].sentence, 'ex-0');
+        await cacheSpeech(data.examples[0].sentence);
+        setCachedKeys(prev => new Set(prev).add('ex-0'));
+      }
+    };
+
+    prefetch();
     setPracticeText((data as SavedWord).userSentence || "");
     setIsEditing(!((data as SavedWord).userSentence));
   }, [data]);
@@ -28,9 +56,10 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
     try {
       setPlayingId(id);
       await playSpeech(text, () => {
-        // If it starts generating (not in cache), update state
         setGeneratingId(id);
       });
+      // 성공적으로 재생/생성 후 캐시 상태 업데이트
+      setCachedKeys(prev => new Set(prev).add(id));
     } catch (e) {
       console.error(e);
     } finally {
@@ -65,10 +94,14 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
             className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-sm active:scale-90 ${
               generatingId === 'main-word' ? 'bg-amber-500 text-white animate-bounce' : 
               playingId === 'main-word' ? 'bg-indigo-600 text-white animate-pulse' : 
-              'bg-white text-indigo-500'
+              cachedKeys.has('main-word') ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-white text-slate-300'
             }`}
           >
-            <i className={`fa-solid ${generatingId === 'main-word' ? 'fa-wand-magic-sparkles' : playingId === 'main-word' ? 'fa-volume-high' : 'fa-volume-low'}`}></i>
+            <i className={`fa-solid ${
+              generatingId === 'main-word' ? 'fa-wand-magic-sparkles' : 
+              playingId === 'main-word' ? 'fa-volume-high' : 
+              cachedKeys.has('main-word') ? 'fa-volume-low' : 'fa-volume-xmark opacity-30'
+            }`}></i>
           </button>
         </div>
         <div className="bg-white/80 p-3.5 rounded-xl border border-indigo-100 shadow-sm relative overflow-hidden">
@@ -82,6 +115,7 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
         {data.examples && data.examples.map((ex, idx) => {
           const isGenerating = generatingId === `ex-${idx}`;
           const isPlaying = playingId === `ex-${idx}`;
+          const isCached = cachedKeys.has(`ex-${idx}`);
           
           return (
             <div key={idx} className="group">
@@ -94,10 +128,14 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
                   className={`p-1.5 rounded-lg transition-all ${
                     isGenerating ? 'text-amber-500 animate-spin' :
                     isPlaying ? 'text-indigo-600 animate-pulse' : 
-                    'text-slate-300 hover:text-indigo-400 active:scale-90'
+                    isCached ? 'text-indigo-400' : 'text-slate-200 hover:text-indigo-300'
                   }`}
                 >
-                  <i className={`fa-solid ${isGenerating ? 'fa-arrows-rotate' : isPlaying ? 'fa-circle-play' : 'fa-volume-low text-[10px]'}`}></i>
+                  <i className={`fa-solid ${
+                    isGenerating ? 'fa-arrows-rotate' : 
+                    isPlaying ? 'fa-circle-play' : 
+                    isCached ? 'fa-volume-low text-[10px]' : 'fa-volume-xmark text-[10px] opacity-20'
+                  }`}></i>
                 </button>
               </div>
               <p className="text-slate-900 text-[15px] font-bold leading-snug mb-1">
@@ -124,7 +162,7 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
                     className={`text-[10px] transition-all ${
                       generatingId === 'user-practice' ? 'text-amber-500 animate-spin' :
                       playingId === 'user-practice' ? 'text-indigo-600 animate-pulse' : 
-                      'text-slate-400'
+                      cachedKeys.has('user-practice') ? 'text-indigo-500' : 'text-slate-300'
                     }`}
                   >
                     <i className={`fa-solid ${generatingId === 'user-practice' ? 'fa-arrows-rotate' : 'fa-volume-low'}`}></i>
