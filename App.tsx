@@ -12,7 +12,7 @@ const App: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [savedWords, setSavedWords] = useState<SavedWord[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false); // 데이터 로딩 완료 전까지 저장 방지
+  const [isLoaded, setIsLoaded] = useState(false); // 초기 로딩 완료 여부
   const [selectedWord, setSelectedWord] = useState<SavedWord | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -25,7 +25,7 @@ const App: React.FC = () => {
   const [dbKey, setDbKey] = useState(localStorage.getItem('supabase_key') || "");
   const [dbUserId, setDbUserId] = useState(localStorage.getItem('supabase_user_id') || "lexi_user_shared");
 
-  // 동기화 함수: 항상 SavedWord[]를 반환함을 보장하여 TS2345 에러 해결
+  // 동기화 함수: 로컬과 클라우드 데이터를 안전하게 합침
   const syncWithCloud = useCallback(async (localData: SavedWord[]): Promise<SavedWord[]> => {
     if (!db.isSupabaseConfigured()) return localData;
     setIsSyncing(true);
@@ -34,7 +34,7 @@ const App: React.FC = () => {
     try {
       const fetched = await db.fetchWordsFromDB();
       
-      // fetched가 null이면 서버 에러이므로 로컬 데이터를 그대로 유지
+      // 서버 에러(null)인 경우 로컬 데이터 유지
       if (fetched === null) {
         setSyncStatus("Sync Failed");
         setTimeout(() => setSyncStatus(null), 3000);
@@ -42,19 +42,21 @@ const App: React.FC = () => {
         return localData;
       }
 
-      // fetched는 이제 확실히 SavedWord[] 타입임 (TS18047 해결)
       const cloudWords: SavedWord[] = fetched;
       const cloudWordNames = new Set(cloudWords.map(w => w.word.toLowerCase()));
+      
+      // 로컬에만 있는 단어 추출
       const localOnlyWords = localData.filter(w => !cloudWordNames.has(w.word.toLowerCase()));
       
       if (localOnlyWords.length > 0) {
         setSyncStatus(`Uploading ${localOnlyWords.length} words...`);
         await db.uploadLocalWords(localOnlyWords);
+        // 업로드 후 다시 불러오기
         const refetched = await db.fetchWordsFromDB();
         setIsSyncing(false);
         setSyncStatus("Synced");
         setTimeout(() => setSyncStatus(null), 2000);
-        return (refetched && refetched.length > 0) ? refetched : cloudWords;
+        return refetched && refetched.length > 0 ? refetched : [...cloudWords, ...localOnlyWords];
       }
       
       setIsSyncing(false);
@@ -63,17 +65,17 @@ const App: React.FC = () => {
       return cloudWords;
     } catch (e) {
       console.error("Sync error:", e);
-      setSyncStatus("Error");
+      setSyncStatus("Sync Error");
       setTimeout(() => setSyncStatus(null), 3000);
       setIsSyncing(false);
       return localData;
     }
   }, []);
 
-  // 초기 데이터 로딩
+  // 초기화 로직
   useEffect(() => {
     const initData = async () => {
-      // 1. 메시지 로드
+      // 1. 메시지 복원
       const storedMessages = localStorage.getItem('efl_chat_history');
       if (storedMessages) {
         try {
@@ -84,25 +86,25 @@ const App: React.FC = () => {
         } catch (e) { showWelcome(); }
       } else { showWelcome(); }
 
-      // 2. 로컬 단어장 로드
-      let initialWords: SavedWord[] = [];
+      // 2. 단어장 복원
+      let localWords: SavedWord[] = [];
       const storedWords = localStorage.getItem('efl_lexicon_saved');
       if (storedWords) {
         try { 
           const parsed = JSON.parse(storedWords);
-          if (Array.isArray(parsed)) initialWords = parsed;
+          if (Array.isArray(parsed)) localWords = parsed;
         } catch (e) {}
       }
       
-      // 3. 클라우드 동기화 또는 로컬 데이터 설정
+      // 3. 동기화
       if (db.isSupabaseConfigured()) {
-        const synced = await syncWithCloud(initialWords);
-        setSavedWords(synced);
+        const result = await syncWithCloud(localWords);
+        setSavedWords(result);
       } else {
-        setSavedWords(initialWords);
+        setSavedWords(localWords);
       }
       
-      // 4. 모든 로딩이 끝난 후에야 스토리지 저장 허용
+      // 4. 로딩 완료 설정 (이 시점 이후부터 localStorage 저장이 활성화됨)
       setIsLoaded(true);
     };
     initData();
@@ -117,13 +119,14 @@ const App: React.FC = () => {
     }]);
   };
 
-  // 단어장 변경 시 로컬 스토리지 업데이트 (로딩 완료 전에는 빈 배열 저장 금지)
+  // 단어장 변경 시 로컬 저장 (데이터 소실 방지 가드 포함)
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem('efl_lexicon_saved', JSON.stringify(savedWords));
     }
   }, [savedWords, isLoaded]);
 
+  // 메시지 변경 시 로컬 저장
   useEffect(() => {
     if (isLoaded && messages.length > 0) {
       localStorage.setItem('efl_chat_history', JSON.stringify(messages));
@@ -162,8 +165,13 @@ const App: React.FC = () => {
         if (saved) {
           setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: saved, timestamp: Date.now() }]);
           setSavedWords(prev => [saved, ...prev.filter(w => w.word.toLowerCase() !== details.word.toLowerCase())]);
-        } else { saveLocalOnly(wordToSave); }
-      } else { saveLocalOnly(wordToSave); }
+        } else {
+          // 서버 저장 실패 시 로컬에라도 저장
+          saveLocalOnly(wordToSave);
+        }
+      } else {
+        saveLocalOnly(wordToSave);
+      }
     } catch (error) {
       setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: "AI 응답 오류가 발생했습니다.", timestamp: Date.now() }]);
     } finally { setIsLoading(false); }
@@ -204,10 +212,12 @@ const App: React.FC = () => {
     if (!targetWordName) return;
 
     setSavedWords(prev => prev.map(w => (w.word.toLowerCase() === targetWordName) ? { ...w, userSentence: sentence } : w));
+    
     if (db.isSupabaseConfigured()) {
       const wordToSync = savedWords.find(w => w.word.toLowerCase() === targetWordName);
       if (wordToSync) await db.saveWordToDB({ ...wordToSync, userSentence: sentence });
     }
+    
     setMessages(prev => prev.map(msg => {
       const content = msg.content;
       if (content && typeof content === 'object' && 'word' in content) {
@@ -217,6 +227,7 @@ const App: React.FC = () => {
       }
       return msg;
     }));
+
     if (selectedWord && selectedWord.word.toLowerCase() === targetWordName) {
       setSelectedWord(prev => prev ? { ...prev, userSentence: sentence } : null);
     }
