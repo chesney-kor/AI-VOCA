@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ChatMessage, SavedWord, WordDetail } from './types';
-import { getWordDetails, unlockAudio } from './services/geminiService';
+import { getWordDetails } from './services/geminiService';
 import * as db from './services/supabaseService';
 import WordDetailCard from './components/WordDetailCard';
 import QuizView from './components/QuizView';
@@ -18,30 +18,10 @@ const App: React.FC = () => {
   
   const touchStartX = useRef<number | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
-  const audioUnlocked = useRef(false);
 
   const [dbUrl, setDbUrl] = useState(localStorage.getItem('supabase_url') || "");
   const [dbKey, setDbKey] = useState(localStorage.getItem('supabase_key') || "");
   const [dbUserId, setDbUserId] = useState(localStorage.getItem('supabase_user_id') || "my_lexicon_user");
-
-  // iOS용 오디오 시스템 미리 활성화
-  const handleGlobalClick = useCallback(() => {
-    if (!audioUnlocked.current) {
-      unlockAudio().then(() => {
-        audioUnlocked.current = true;
-        console.log("Audio System Unlocked for iOS");
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('click', handleGlobalClick, { once: true });
-    window.addEventListener('touchstart', handleGlobalClick, { once: true });
-    return () => {
-      window.removeEventListener('click', handleGlobalClick);
-      window.removeEventListener('touchstart', handleGlobalClick);
-    };
-  }, [handleGlobalClick]);
 
   const syncWithCloud = useCallback(async (localData: SavedWord[]) => {
     if (!db.isSupabaseConfigured()) return localData;
