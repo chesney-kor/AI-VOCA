@@ -12,7 +12,7 @@ const App: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [savedWords, setSavedWords] = useState<SavedWord[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false); // 데이터 로딩 완료 여부 추적
+  const [isLoaded, setIsLoaded] = useState(false); // 데이터 로딩 완료 전까지 저장 방지
   const [selectedWord, setSelectedWord] = useState<SavedWord | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -25,7 +25,7 @@ const App: React.FC = () => {
   const [dbKey, setDbKey] = useState(localStorage.getItem('supabase_key') || "");
   const [dbUserId, setDbUserId] = useState(localStorage.getItem('supabase_user_id') || "lexi_user_shared");
 
-  // 클라우드 동기화 로직 - 항상 SavedWord[]를 반환함을 보장
+  // 동기화 함수: 항상 SavedWord[]를 반환함을 보장하여 TS2345 에러 해결
   const syncWithCloud = useCallback(async (localData: SavedWord[]): Promise<SavedWord[]> => {
     if (!db.isSupabaseConfigured()) return localData;
     setIsSyncing(true);
@@ -34,15 +34,15 @@ const App: React.FC = () => {
     try {
       const fetched = await db.fetchWordsFromDB();
       
-      // fetched가 null인 경우(에러 등) 로컬 데이터 유지
-      if (!fetched) {
+      // fetched가 null이면 서버 에러이므로 로컬 데이터를 그대로 유지
+      if (fetched === null) {
         setSyncStatus("Sync Failed");
         setTimeout(() => setSyncStatus(null), 3000);
         setIsSyncing(false);
         return localData;
       }
 
-      // 이제 fetched는 확실히 SavedWord[] 타입
+      // fetched는 이제 확실히 SavedWord[] 타입임 (TS18047 해결)
       const cloudWords: SavedWord[] = fetched;
       const cloudWordNames = new Set(cloudWords.map(w => w.word.toLowerCase()));
       const localOnlyWords = localData.filter(w => !cloudWordNames.has(w.word.toLowerCase()));
@@ -54,7 +54,7 @@ const App: React.FC = () => {
         setIsSyncing(false);
         setSyncStatus("Synced");
         setTimeout(() => setSyncStatus(null), 2000);
-        return refetched && refetched.length > 0 ? refetched : cloudWords;
+        return (refetched && refetched.length > 0) ? refetched : cloudWords;
       }
       
       setIsSyncing(false);
@@ -70,10 +70,10 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // 초기 데이터 로드
+  // 초기 데이터 로딩
   useEffect(() => {
     const initData = async () => {
-      // 메시지 히스토리 로드
+      // 1. 메시지 로드
       const storedMessages = localStorage.getItem('efl_chat_history');
       if (storedMessages) {
         try {
@@ -84,22 +84,25 @@ const App: React.FC = () => {
         } catch (e) { showWelcome(); }
       } else { showWelcome(); }
 
-      // 로컬 단어장 로드
-      let currentWords: SavedWord[] = [];
+      // 2. 로컬 단어장 로드
+      let initialWords: SavedWord[] = [];
       const storedWords = localStorage.getItem('efl_lexicon_saved');
       if (storedWords) {
-        try { currentWords = JSON.parse(storedWords); } catch (e) {}
+        try { 
+          const parsed = JSON.parse(storedWords);
+          if (Array.isArray(parsed)) initialWords = parsed;
+        } catch (e) {}
       }
       
-      // 동기화 시도
+      // 3. 클라우드 동기화 또는 로컬 데이터 설정
       if (db.isSupabaseConfigured()) {
-        const syncedWords = await syncWithCloud(currentWords);
-        setSavedWords(syncedWords);
+        const synced = await syncWithCloud(initialWords);
+        setSavedWords(synced);
       } else {
-        setSavedWords(currentWords);
+        setSavedWords(initialWords);
       }
       
-      // 로딩 완료 표시 (이후부터 localStorage 저장 허용)
+      // 4. 모든 로딩이 끝난 후에야 스토리지 저장 허용
       setIsLoaded(true);
     };
     initData();
@@ -114,7 +117,7 @@ const App: React.FC = () => {
     }]);
   };
 
-  // 단어장 변경 시 저장 - isLoaded가 true일 때만 실행되어 초기화 시 데이터 유실 방지
+  // 단어장 변경 시 로컬 스토리지 업데이트 (로딩 완료 전에는 빈 배열 저장 금지)
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem('efl_lexicon_saved', JSON.stringify(savedWords));
@@ -122,7 +125,7 @@ const App: React.FC = () => {
   }, [savedWords, isLoaded]);
 
   useEffect(() => {
-    if (messages.length > 0) {
+    if (isLoaded && messages.length > 0) {
       localStorage.setItem('efl_chat_history', JSON.stringify(messages));
     }
     if (activeTab === 'chat' && chatScrollRef.current) {
@@ -131,7 +134,7 @@ const App: React.FC = () => {
         behavior: 'smooth'
       });
     }
-  }, [messages, isLoading, activeTab]);
+  }, [messages, isLoading, activeTab, isLoaded]);
 
   const handleSearch = async (e?: React.FormEvent) => {
     e?.preventDefault();
