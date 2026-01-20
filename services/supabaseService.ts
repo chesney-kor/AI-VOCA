@@ -48,6 +48,7 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[] | null> => {
       headers: headers()
     });
     if (!res.ok) {
+      console.error("Supabase Fetch Failed:", await res.text());
       return null;
     }
     const data = await res.json();
@@ -70,26 +71,36 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[] | null> => {
 export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedWord | null> => {
   if (!isSupabaseConfigured()) return null;
   try {
+    // 1. 기존 데이터 존재 확인
     const checkRes = await fetch(`${supabaseUrl}/rest/v1/saved_words?user_id=eq.${userId}&word=eq.${encodeURIComponent(word.word)}`, {
       method: "GET",
       headers: headers()
     });
-    const existing = await checkRes.json();
+    
+    let existing: any[] = [];
+    if (checkRes.ok) {
+      existing = await checkRes.json();
+    }
     
     const payload = {
       word: word.word,
       nuance: word.nuance,
-      examples: word.examples,
+      examples: Array.isArray(word.examples) ? word.examples : [],
       user_sentence: (word as SavedWord).userSentence || null,
       user_id: userId
     };
 
-    if (existing && Array.isArray(existing) && existing.length > 0) {
+    if (Array.isArray(existing) && existing.length > 0) {
+      // UPDATE (PATCH)
       const updateRes = await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${existing[0].id}`, {
         method: "PATCH",
         headers: headers(),
         body: JSON.stringify(payload)
       });
+      if (!updateRes.ok) {
+        console.error("Update Failed:", await updateRes.text());
+        return null;
+      }
       const updated = await updateRes.json();
       if (updated && updated[0]) {
         return {
@@ -99,21 +110,26 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
           savedAt: new Date(updated[0].created_at).getTime()
         } as SavedWord;
       }
-    }
-
-    const res = await fetch(`${supabaseUrl}/rest/v1/saved_words`, {
-      method: "POST",
-      headers: headers(),
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (data && data[0]) {
-      return {
-        ...word,
-        id: data[0].id,
-        userSentence: data[0].user_sentence,
-        savedAt: new Date(data[0].created_at).getTime()
-      } as SavedWord;
+    } else {
+      // INSERT (POST)
+      const res = await fetch(`${supabaseUrl}/rest/v1/saved_words`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        console.error("Insert Failed (400?):", await res.text());
+        return null;
+      }
+      const data = await res.json();
+      if (data && data[0]) {
+        return {
+          ...word,
+          id: data[0].id,
+          userSentence: data[0].user_sentence,
+          savedAt: new Date(data[0].created_at).getTime()
+        } as SavedWord;
+      }
     }
     return null;
   } catch (error) {
@@ -125,6 +141,7 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
 export const deleteWordFromDB = async (id: string) => {
   if (!isSupabaseConfigured()) return;
   try {
+    // 임시 ID(로컬 전용)인 경우 DB 삭제 스킵
     if (id.length > 15) {
       await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${id}`, {
         method: "DELETE",
