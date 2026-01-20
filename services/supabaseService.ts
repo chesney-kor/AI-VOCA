@@ -1,7 +1,6 @@
 
 import { SavedWord, WordDetail } from "../types";
 
-// 기본 ID를 통일하여 설정 누락 시에도 같은 저장소를 바라보게 함
 const DEFAULT_ID = "lexi_user_shared";
 let supabaseUrl = localStorage.getItem('supabase_url') || "";
 let supabaseKey = localStorage.getItem('supabase_key') || "";
@@ -49,10 +48,11 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[] | null> => {
       headers: headers()
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) throw new Error("Unauthorized");
       return null;
     }
     const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    
     return data.map((item: any) => ({
       id: item.id,
       word: item.word,
@@ -63,7 +63,7 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[] | null> => {
     }));
   } catch (error) {
     console.error("Supabase Fetch Error:", error);
-    return null; // 에러 시 null을 반환하여 로컬 데이터를 보호
+    return null;
   }
 };
 
@@ -97,7 +97,7 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
           id: updated[0].id,
           userSentence: updated[0].user_sentence,
           savedAt: new Date(updated[0].created_at).getTime()
-        };
+        } as SavedWord;
       }
     }
 
@@ -113,7 +113,7 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
         id: data[0].id,
         userSentence: data[0].user_sentence,
         savedAt: new Date(data[0].created_at).getTime()
-      };
+      } as SavedWord;
     }
     return null;
   } catch (error) {
@@ -125,7 +125,6 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
 export const deleteWordFromDB = async (id: string) => {
   if (!isSupabaseConfigured()) return;
   try {
-    // Local ID(timestamp)가 아닌 Supabase UUID인 경우에만 삭제 요청
     if (id.length > 15) {
       await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${id}`, {
         method: "DELETE",
