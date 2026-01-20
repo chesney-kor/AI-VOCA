@@ -2,8 +2,8 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { WordDetail, QuizQuestion } from "../types";
 import { SYSTEM_INSTRUCTION } from "../constants";
+import { getCachedAudio, setCachedAudio } from "./audioCacheService";
 
-// Initialize GoogleGenAI with the provided API key from environment variables
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const cleanJSONResponse = (text: string) => {
@@ -72,7 +72,7 @@ export const generateQuiz = async (savedWords: string[]): Promise<QuizQuestion> 
   return JSON.parse(cleanJSONResponse(text)) as QuizQuestion;
 };
 
-// --- TTS Logic ---
+// --- TTS Logic with Caching ---
 
 function decodeBase64(base64: string) {
   const binaryString = atob(base64);
@@ -103,26 +103,37 @@ async function decodeAudioData(
   return buffer;
 }
 
-export const playSpeech = async (text: string) => {
+export const playSpeech = async (text: string, onGenerateStart?: () => void) => {
+  const cacheKey = `tts_${text.slice(0, 50)}_${text.length}`;
+  
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: text }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' },
+    let audioData = await getCachedAudio(cacheKey);
+    
+    if (!audioData) {
+      // Not in cache, call API
+      if (onGenerateStart) onGenerateStart();
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: text }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: 'Kore' },
+            },
           },
         },
-      },
-    });
+      });
 
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Audio) throw new Error("No audio data received");
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!base64Audio) throw new Error("No audio data received");
+      
+      audioData = decodeBase64(base64Audio);
+      // Save to cache for future use
+      await setCachedAudio(cacheKey, audioData);
+    }
 
     const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-    const audioData = decodeBase64(base64Audio);
     const audioBuffer = await decodeAudioData(audioData, audioCtx);
 
     const source = audioCtx.createBufferSource();
@@ -137,7 +148,7 @@ export const playSpeech = async (text: string) => {
       };
     });
   } catch (error) {
-    console.error("Speech Generation Error:", error);
+    console.error("Speech Process Error:", error);
     throw error;
   }
 };
