@@ -6,16 +6,22 @@ import { getCachedAudio, setCachedAudio } from "./audioCacheService";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// 전역 오디오 컨텍스트 싱글톤 (반응 속도 개선)
+// 전역 오디오 컨텍스트 싱글톤
 let globalAudioCtx: AudioContext | null = null;
-const getAudioCtx = () => {
+
+export const getAudioCtx = () => {
   if (!globalAudioCtx) {
     globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
   }
-  if (globalAudioCtx.state === 'suspended') {
-    globalAudioCtx.resume();
-  }
   return globalAudioCtx;
+};
+
+// iOS/Safari용 오디오 잠금 해제 함수
+export const unlockAudio = async () => {
+  const ctx = getAudioCtx();
+  if (ctx.state === 'suspended') {
+    await ctx.resume();
+  }
 };
 
 const cleanJSONResponse = (text: string) => {
@@ -115,7 +121,6 @@ async function decodeAudioData(
   return buffer;
 }
 
-// 오직 캐시 생성만 담당하는 함수 (백그라운드용)
 export const cacheSpeech = async (text: string) => {
   if (!text.trim()) return;
   const cacheKey = `tts_${text.slice(0, 50)}_${text.length}`;
@@ -147,6 +152,13 @@ export const cacheSpeech = async (text: string) => {
 
 export const playSpeech = async (text: string, onGenerateStart?: () => void) => {
   if (!text.trim()) return;
+
+  // CRITICAL: iOS/Safari를 위해 어떤 비동기 작업보다 먼저 컨텍스트를 깨웁니다.
+  const audioCtx = getAudioCtx();
+  if (audioCtx.state === 'suspended') {
+    await audioCtx.resume();
+  }
+
   const cacheKey = `tts_${text.slice(0, 50)}_${text.length}`;
   
   try {
@@ -173,9 +185,7 @@ export const playSpeech = async (text: string, onGenerateStart?: () => void) => 
       await setCachedAudio(cacheKey, audioData);
     }
 
-    const audioCtx = getAudioCtx();
     const audioBuffer = await decodeAudioData(audioData, audioCtx);
-
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioCtx.destination);
@@ -183,10 +193,6 @@ export const playSpeech = async (text: string, onGenerateStart?: () => void) => 
     
     return new Promise((resolve) => {
       source.onended = () => resolve(true);
-      // 안전장치: 브라우저 정책에 의해 재생이 막힐 경우 대비
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
     });
   } catch (error) {
     console.error("Speech Process Error:", error);
