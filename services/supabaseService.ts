@@ -48,11 +48,13 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[] | null> => {
       method: "GET",
       headers: headers()
     });
+    
     if (!res.ok) {
       const errorText = await res.text();
       console.error("Supabase Fetch Failed:", errorText);
       return null;
     }
+    
     const data = await res.json();
     if (!Array.isArray(data)) return [];
     
@@ -60,7 +62,7 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[] | null> => {
       id: item.id,
       word: item.word,
       nuance: item.nuance,
-      examples: item.examples,
+      examples: Array.isArray(item.examples) ? item.examples : [],
       userSentence: item.user_sentence,
       savedAt: new Date(item.created_at).getTime()
     }));
@@ -76,7 +78,7 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
     const encodedUserId = encodeURIComponent(userId);
     const encodedWord = encodeURIComponent(word.word);
     
-    // 1. 기존 데이터 존재 확인
+    // 1. 기존 데이터 확인 (중복 방지)
     const checkRes = await fetch(`${supabaseUrl}/rest/v1/saved_words?user_id=eq.${encodedUserId}&word=eq.${encodedWord}`, {
       method: "GET",
       headers: headers()
@@ -86,7 +88,8 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
     if (checkRes.ok) {
       existing = await checkRes.json();
     }
-    
+
+    // 2. 페이로드 준비
     const payload = {
       word: word.word,
       nuance: word.nuance,
@@ -95,48 +98,42 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
       user_id: userId
     };
 
+    let res;
     if (Array.isArray(existing) && existing.length > 0) {
-      // UPDATE (PATCH)
-      const updateRes = await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${existing[0].id}`, {
+      // UPDATE
+      res = await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${existing[0].id}`, {
         method: "PATCH",
         headers: headers(),
         body: JSON.stringify(payload)
       });
-      if (!updateRes.ok) {
-        const errorText = await updateRes.text();
-        console.error("Supabase Update Failed (400?):", errorText);
-        return null;
-      }
-      const updated = await updateRes.json();
-      if (updated && updated[0]) {
-        return {
-          ...word,
-          id: updated[0].id,
-          userSentence: updated[0].user_sentence,
-          savedAt: new Date(updated[0].created_at).getTime()
-        } as SavedWord;
-      }
     } else {
-      // INSERT (POST)
-      const res = await fetch(`${supabaseUrl}/rest/v1/saved_words`, {
+      // INSERT
+      res = await fetch(`${supabaseUrl}/rest/v1/saved_words`, {
         method: "POST",
         headers: headers(),
         body: JSON.stringify(payload)
       });
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Supabase Insert Failed (400?):", errorText);
-        return null;
-      }
-      const data = await res.json();
-      if (data && data[0]) {
-        return {
-          ...word,
-          id: data[0].id,
-          userSentence: data[0].user_sentence,
-          savedAt: new Date(data[0].created_at).getTime()
-        } as SavedWord;
-      }
+    }
+
+    if (!res.ok) {
+      const errorDetail = await res.text();
+      console.group("Supabase 400 Error Debug");
+      console.error("Status:", res.status);
+      console.error("Message:", errorDetail);
+      console.log("Sent Payload:", payload);
+      console.groupEnd();
+      return null;
+    }
+
+    const data = await res.json();
+    if (data && data[0]) {
+      const item = data[0];
+      return {
+        ...word,
+        id: item.id,
+        userSentence: item.user_sentence,
+        savedAt: new Date(item.created_at).getTime()
+      } as SavedWord;
     }
     return null;
   } catch (error) {
@@ -148,8 +145,7 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
 export const deleteWordFromDB = async (id: string) => {
   if (!isSupabaseConfigured()) return;
   try {
-    // UUID 형식이 아닌 로컬 ID는 DB 삭제에서 제외
-    if (id.length > 15) {
+    if (id && id.length > 15 && !id.startsWith('local_')) {
       await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${id}`, {
         method: "DELETE",
         headers: headers()
