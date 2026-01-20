@@ -1,9 +1,11 @@
 
 import { SavedWord, WordDetail } from "../types";
 
+// 기본 ID를 통일하여 설정 누락 시에도 같은 저장소를 바라보게 함
+const DEFAULT_ID = "lexi_user_shared";
 let supabaseUrl = localStorage.getItem('supabase_url') || "";
 let supabaseKey = localStorage.getItem('supabase_key') || "";
-let userId = localStorage.getItem('supabase_user_id') || "default_user";
+let userId = localStorage.getItem('supabase_user_id') || DEFAULT_ID;
 
 export const isSupabaseConfigured = () => {
   return supabaseUrl.startsWith('http') && supabaseKey.length > 20;
@@ -13,10 +15,10 @@ export const setSupabaseConfig = (url: string, key: string, id: string) => {
   const cleanUrl = url.trim().replace(/\/$/, ""); 
   localStorage.setItem('supabase_url', cleanUrl);
   localStorage.setItem('supabase_key', key.trim());
-  localStorage.setItem('supabase_user_id', id.trim());
+  localStorage.setItem('supabase_user_id', id.trim() || DEFAULT_ID);
   supabaseUrl = cleanUrl;
   supabaseKey = key.trim();
-  userId = id.trim();
+  userId = id.trim() || DEFAULT_ID;
 };
 
 const headers = () => ({
@@ -39,14 +41,17 @@ export const testConnection = async (): Promise<boolean> => {
   }
 };
 
-export const fetchWordsFromDB = async (): Promise<SavedWord[]> => {
-  if (!isSupabaseConfigured()) return [];
+export const fetchWordsFromDB = async (): Promise<SavedWord[] | null> => {
+  if (!isSupabaseConfigured()) return null;
   try {
     const res = await fetch(`${supabaseUrl}/rest/v1/saved_words?user_id=eq.${userId}&order=created_at.desc`, {
       method: "GET",
       headers: headers()
     });
-    if (!res.ok) throw new Error("Fetch failed");
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) throw new Error("Unauthorized");
+      return null;
+    }
     const data = await res.json();
     return data.map((item: any) => ({
       id: item.id,
@@ -58,14 +63,14 @@ export const fetchWordsFromDB = async (): Promise<SavedWord[]> => {
     }));
   } catch (error) {
     console.error("Supabase Fetch Error:", error);
-    return [];
+    return null; // 에러 시 null을 반환하여 로컬 데이터를 보호
   }
 };
 
 export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedWord | null> => {
   if (!isSupabaseConfigured()) return null;
   try {
-    const checkRes = await fetch(`${supabaseUrl}/rest/v1/saved_words?user_id=eq.${userId}&word=eq.${word.word}`, {
+    const checkRes = await fetch(`${supabaseUrl}/rest/v1/saved_words?user_id=eq.${userId}&word=eq.${encodeURIComponent(word.word)}`, {
       method: "GET",
       headers: headers()
     });
@@ -79,8 +84,7 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
       user_id: userId
     };
 
-    if (existing && existing.length > 0) {
-      // Update existing
+    if (existing && Array.isArray(existing) && existing.length > 0) {
       const updateRes = await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${existing[0].id}`, {
         method: "PATCH",
         headers: headers(),
@@ -121,6 +125,7 @@ export const saveWordToDB = async (word: WordDetail | SavedWord): Promise<SavedW
 export const deleteWordFromDB = async (id: string) => {
   if (!isSupabaseConfigured()) return;
   try {
+    // Local ID(timestamp)가 아닌 Supabase UUID인 경우에만 삭제 요청
     if (id.length > 15) {
       await fetch(`${supabaseUrl}/rest/v1/saved_words?id=eq.${id}`, {
         method: "DELETE",
