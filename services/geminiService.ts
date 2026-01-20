@@ -117,6 +117,7 @@ async function decodeAudioData(
 
 // 오직 캐시 생성만 담당하는 함수 (백그라운드용)
 export const cacheSpeech = async (text: string) => {
+  if (!text.trim()) return;
   const cacheKey = `tts_${text.slice(0, 50)}_${text.length}`;
   const existing = await getCachedAudio(cacheKey);
   if (existing) return;
@@ -145,6 +146,7 @@ export const cacheSpeech = async (text: string) => {
 };
 
 export const playSpeech = async (text: string, onGenerateStart?: () => void) => {
+  if (!text.trim()) return;
   const cacheKey = `tts_${text.slice(0, 50)}_${text.length}`;
   
   try {
@@ -181,6 +183,10 @@ export const playSpeech = async (text: string, onGenerateStart?: () => void) => 
     
     return new Promise((resolve) => {
       source.onended = () => resolve(true);
+      // 안전장치: 브라우저 정책에 의해 재생이 막힐 경우 대비
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
     });
   } catch (error) {
     console.error("Speech Process Error:", error);
