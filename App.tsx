@@ -32,14 +32,15 @@ const App: React.FC = () => {
     try {
       const cloudWords = await db.fetchWordsFromDB();
       
-      // 서버 에러로 null이 오면 로컬 데이터 유지
-      if (cloudWords === null) {
+      // 서버 에러로 null이 오면 로컬 데이터 유지하고 종료
+      if (!cloudWords) {
         setSyncStatus("Sync Failed");
         setTimeout(() => setSyncStatus(null), 3000);
         setIsSyncing(false);
         return localData;
       }
 
+      // 이제 cloudWords는 확실히 SavedWord[] 타입임
       const cloudWordNames = new Set(cloudWords.map(w => w.word.toLowerCase()));
       const localOnlyWords = localData.filter(w => !cloudWordNames.has(w.word.toLowerCase()));
       
@@ -51,7 +52,8 @@ const App: React.FC = () => {
         setIsSyncing(false);
         setSyncStatus("Synced");
         setTimeout(() => setSyncStatus(null), 2000);
-        return finalWords || localData;
+        // finalWords가 혹시라도 null이면 업로드 전 데이터(cloudWords)라도 반환
+        return finalWords || cloudWords;
       }
       
       setIsSyncing(false);
