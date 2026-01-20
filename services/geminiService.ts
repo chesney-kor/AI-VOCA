@@ -6,6 +6,18 @@ import { getCachedAudio, setCachedAudio } from "./audioCacheService";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+// 전역 오디오 컨텍스트 싱글톤 (반응 속도 개선)
+let globalAudioCtx: AudioContext | null = null;
+const getAudioCtx = () => {
+  if (!globalAudioCtx) {
+    globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+  }
+  if (globalAudioCtx.state === 'suspended') {
+    globalAudioCtx.resume();
+  }
+  return globalAudioCtx;
+};
+
 const cleanJSONResponse = (text: string) => {
   return text.replace(/```json\n?|```/g, '').trim();
 };
@@ -72,7 +84,7 @@ export const generateQuiz = async (savedWords: string[]): Promise<QuizQuestion> 
   return JSON.parse(cleanJSONResponse(text)) as QuizQuestion;
 };
 
-// --- TTS Logic with Caching ---
+// --- TTS Logic ---
 
 function decodeBase64(base64: string) {
   const binaryString = atob(base64);
@@ -103,6 +115,35 @@ async function decodeAudioData(
   return buffer;
 }
 
+// 오직 캐시 생성만 담당하는 함수 (백그라운드용)
+export const cacheSpeech = async (text: string) => {
+  const cacheKey = `tts_${text.slice(0, 50)}_${text.length}`;
+  const existing = await getCachedAudio(cacheKey);
+  if (existing) return;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-preview-tts",
+      contents: [{ parts: [{ text: text }] }],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: 'Kore' },
+          },
+        },
+      },
+    });
+
+    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (base64Audio) {
+      await setCachedAudio(cacheKey, decodeBase64(base64Audio));
+    }
+  } catch (e) {
+    console.warn("Silent background caching failed:", e);
+  }
+};
+
 export const playSpeech = async (text: string, onGenerateStart?: () => void) => {
   const cacheKey = `tts_${text.slice(0, 50)}_${text.length}`;
   
@@ -110,7 +151,6 @@ export const playSpeech = async (text: string, onGenerateStart?: () => void) => 
     let audioData = await getCachedAudio(cacheKey);
     
     if (!audioData) {
-      // Not in cache, call API
       if (onGenerateStart) onGenerateStart();
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
@@ -127,25 +167,20 @@ export const playSpeech = async (text: string, onGenerateStart?: () => void) => 
 
       const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (!base64Audio) throw new Error("No audio data received");
-      
       audioData = decodeBase64(base64Audio);
-      // Save to cache for future use
       await setCachedAudio(cacheKey, audioData);
     }
 
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    const audioCtx = getAudioCtx();
     const audioBuffer = await decodeAudioData(audioData, audioCtx);
 
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioCtx.destination);
-    source.start();
+    source.start(0);
     
     return new Promise((resolve) => {
-      source.onended = () => {
-        audioCtx.close();
-        resolve(true);
-      };
+      source.onended = () => resolve(true);
     });
   } catch (error) {
     console.error("Speech Process Error:", error);
