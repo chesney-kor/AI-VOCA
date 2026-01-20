@@ -15,31 +15,53 @@ const App: React.FC = () => {
   const [selectedWord, setSelectedWord] = useState<SavedWord | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
   
   const touchStartX = useRef<number | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const [dbUrl, setDbUrl] = useState(localStorage.getItem('supabase_url') || "");
   const [dbKey, setDbKey] = useState(localStorage.getItem('supabase_key') || "");
-  const [dbUserId, setDbUserId] = useState(localStorage.getItem('supabase_user_id') || "my_lexicon_user");
+  const [dbUserId, setDbUserId] = useState(localStorage.getItem('supabase_user_id') || "lexi_user_shared");
 
   const syncWithCloud = useCallback(async (localData: SavedWord[]) => {
     if (!db.isSupabaseConfigured()) return localData;
     setIsSyncing(true);
+    setSyncStatus("Syncing...");
+    
     try {
       const cloudWords = await db.fetchWordsFromDB();
+      
+      // 서버 에러로 null이 오면 로컬 데이터 유지
+      if (cloudWords === null) {
+        setSyncStatus("Sync Failed");
+        setTimeout(() => setSyncStatus(null), 3000);
+        setIsSyncing(false);
+        return localData;
+      }
+
       const cloudWordNames = new Set(cloudWords.map(w => w.word.toLowerCase()));
       const localOnlyWords = localData.filter(w => !cloudWordNames.has(w.word.toLowerCase()));
+      
+      // 로컬에만 있는 단어가 있다면 클라우드에 업로드
       if (localOnlyWords.length > 0) {
+        setSyncStatus(`Uploading ${localOnlyWords.length} words...`);
         await db.uploadLocalWords(localOnlyWords);
         const finalWords = await db.fetchWordsFromDB();
         setIsSyncing(false);
-        return finalWords;
+        setSyncStatus("Synced");
+        setTimeout(() => setSyncStatus(null), 2000);
+        return finalWords || localData;
       }
+      
       setIsSyncing(false);
+      setSyncStatus("Synced");
+      setTimeout(() => setSyncStatus(null), 2000);
       return cloudWords.length > 0 ? cloudWords : localData;
     } catch (e) {
       console.error("Sync error:", e);
+      setSyncStatus("Error");
+      setTimeout(() => setSyncStatus(null), 3000);
       setIsSyncing(false);
       return localData;
     }
@@ -64,6 +86,7 @@ const App: React.FC = () => {
       if (storedWords) {
         try { currentWords = JSON.parse(storedWords); } catch (e) {}
       }
+      
       if (db.isSupabaseConfigured()) {
         const syncedWords = await syncWithCloud(currentWords);
         setSavedWords(syncedWords);
@@ -214,7 +237,11 @@ const App: React.FC = () => {
           <h1 className="font-black text-lg text-slate-900 tracking-tight">LEXI<span className="text-indigo-600">AI</span></h1>
         </div>
         <div className="flex items-center gap-2">
-          {isSyncing && <i className="fa-solid fa-arrows-rotate animate-spin text-indigo-400 text-xs"></i>}
+          {syncStatus && (
+            <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md animate-pulse">
+              {syncStatus}
+            </span>
+          )}
           <button onClick={() => setIsSettingsOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all bg-slate-100 text-slate-500 active:scale-90">
             <i className={`fa-solid ${db.isSupabaseConfigured() ? 'fa-cloud-check text-indigo-500' : 'fa-gear'}`}></i>
           </button>
@@ -250,7 +277,16 @@ const App: React.FC = () => {
           <div className="max-w-xl mx-auto space-y-4">
             <div className="flex items-center justify-between px-1">
               <h2 className="text-xl font-black text-slate-900 tracking-tight">Vocabulary</h2>
-              {db.isSupabaseConfigured() && <button onClick={() => syncWithCloud(savedWords)} disabled={isSyncing} className="text-[11px] font-black text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full flex items-center gap-1.5 active:scale-95 transition-all uppercase tracking-wider"><i className={`fa-solid fa-arrows-rotate ${isSyncing ? 'animate-spin' : ''}`}></i> Sync</button>}
+              {db.isSupabaseConfigured() && (
+                <button 
+                  onClick={() => syncWithCloud(savedWords).then(setSavedWords)} 
+                  disabled={isSyncing} 
+                  className="text-[11px] font-black text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full flex items-center gap-1.5 active:scale-95 transition-all uppercase tracking-wider"
+                >
+                  <i className={`fa-solid fa-arrows-rotate ${isSyncing ? 'animate-spin' : ''}`}></i> 
+                  Sync Now
+                </button>
+              )}
             </div>
             {savedWords.length === 0 ? (
               <div className="text-center py-16 bg-white rounded-3xl border-2 border-dashed border-slate-200"><p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Your Lexicon is Empty</p></div>
@@ -310,14 +346,32 @@ const App: React.FC = () => {
           <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-black text-slate-900">Supabase Sync</h3><button onClick={() => setIsSettingsOpen(false)} className="text-slate-400"><i className="fa-solid fa-xmark text-lg"></i></button></div>
             <div className="space-y-4">
-              {['URL', 'Key', 'ID'].map((label, i) => (
+              {['URL', 'Key', 'User ID'].map((label, i) => (
                 <div key={label}>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{label}</label>
-                  <input value={[dbUrl, dbKey, dbUserId][i]} type={label === 'Key' ? 'password' : 'text'} onChange={e => [setDbUrl, setDbKey, setDbUserId][i](e.target.value)} className="w-full mt-1 px-4 py-2.5 bg-slate-50 rounded-xl border border-slate-200 text-sm focus:border-indigo-500 outline-none" />
+                  <input 
+                    value={[dbUrl, dbKey, dbUserId][i]} 
+                    type={label === 'Key' ? 'password' : 'text'} 
+                    placeholder={label === 'User ID' ? "lexi_user_shared" : ""}
+                    onChange={e => [setDbUrl, setDbKey, setDbUserId][i](e.target.value)} 
+                    className="w-full mt-1 px-4 py-2.5 bg-slate-50 rounded-xl border border-slate-200 text-sm focus:border-indigo-500 outline-none" 
+                  />
                 </div>
               ))}
             </div>
-            <button onClick={async () => { db.setSupabaseConfig(dbUrl, dbKey, dbUserId); if(await db.testConnection()){ setIsSyncing(true); setSavedWords(await syncWithCloud(savedWords)); setIsSyncing(false); setIsSettingsOpen(false); } else alert("Connect Failed"); }} className="w-full mt-6 py-3.5 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all">Connect & Sync</button>
+            <button 
+              onClick={async () => { 
+                db.setSupabaseConfig(dbUrl, dbKey, dbUserId); 
+                if(await db.testConnection()){ 
+                  const result = await syncWithCloud(savedWords);
+                  setSavedWords(result);
+                  setIsSettingsOpen(false); 
+                } else alert("Connect Failed. Please check URL and Key."); 
+              }} 
+              className="w-full mt-6 py-3.5 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+            >
+              Connect & Sync
+            </button>
           </div>
         </div>
       )}
