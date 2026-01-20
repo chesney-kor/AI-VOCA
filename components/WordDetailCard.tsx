@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { WordDetail, SavedWord } from '../types';
+import { playSpeech } from '../services/geminiService';
 
 interface WordDetailCardProps {
   data: WordDetail | SavedWord;
@@ -13,11 +14,24 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
   const [practiceText, setPracticeText] = useState((data as SavedWord).userSentence || "");
   const [isEditing, setIsEditing] = useState(!((data as SavedWord).userSentence));
   const [isSaving, setIsSaving] = useState(false);
+  const [playingId, setPlayingId] = useState<string | null>(null);
 
   useEffect(() => {
     setPracticeText((data as SavedWord).userSentence || "");
     setIsEditing(!((data as SavedWord).userSentence));
   }, [data]);
+
+  const handlePlay = async (text: string, id: string) => {
+    if (playingId) return;
+    setPlayingId(id);
+    try {
+      await playSpeech(text);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setPlayingId(null);
+    }
+  };
 
   const handleSave = async () => {
     if (!onUpdatePractice || !practiceText.trim()) return;
@@ -35,7 +49,16 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
   return (
     <div className="bg-white rounded-[2rem] shadow-lg border border-slate-200/60 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="p-5 border-b border-slate-100 bg-gradient-to-br from-indigo-50/20 to-white">
-        <h2 className="text-2xl font-black text-indigo-700 uppercase tracking-tighter mb-3">{data.word}</h2>
+        <div className="flex justify-between items-start mb-3">
+          <h2 className="text-2xl font-black text-indigo-700 uppercase tracking-tighter">{data.word}</h2>
+          <button 
+            onClick={() => handlePlay(`The word is ${data.word}. The nuance is: ${data.nuance}`, 'main-word')}
+            disabled={!!playingId}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${playingId === 'main-word' ? 'bg-indigo-600 text-white animate-pulse' : 'bg-white text-indigo-500 shadow-sm active:scale-90'}`}
+          >
+            <i className={`fa-solid ${playingId === 'main-word' ? 'fa-volume-high' : 'fa-volume-low'}`}></i>
+          </button>
+        </div>
         <div className="bg-white/80 p-3.5 rounded-xl border border-indigo-100 shadow-sm">
           <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Nuance</span>
           <p className="text-slate-800 text-[14px] font-bold leading-relaxed">{data.nuance}</p>
@@ -48,6 +71,13 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
             <div className="flex items-center gap-2 mb-1">
               <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">{ex.category.split('(')[0].trim()}</span>
               <div className="h-[1px] flex-1 bg-slate-50"></div>
+              <button 
+                onClick={() => handlePlay(ex.sentence, `ex-${idx}`)}
+                disabled={!!playingId}
+                className={`p-1.5 rounded-lg transition-all ${playingId === `ex-${idx}` ? 'text-indigo-600' : 'text-slate-300 hover:text-indigo-400 active:scale-90'}`}
+              >
+                <i className={`fa-solid ${playingId === `ex-${idx}` ? 'fa-circle-play animate-spin' : 'fa-volume-low text-[10px]'}`}></i>
+              </button>
             </div>
             <p className="text-slate-900 text-[15px] font-bold leading-snug mb-1">
               {ex.sentence}
@@ -64,7 +94,18 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
           <div className="flex items-center justify-between mb-3">
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">My Context</span>
             {!isEditing && onUpdatePractice && (
-              <button onClick={() => setIsEditing(true)} className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Edit</button>
+              <div className="flex items-center gap-2">
+                {practiceText && (
+                  <button 
+                    onClick={() => handlePlay(practiceText, 'user-practice')}
+                    disabled={!!playingId}
+                    className={`text-[10px] ${playingId === 'user-practice' ? 'text-indigo-600' : 'text-slate-400'}`}
+                  >
+                    <i className="fa-solid fa-volume-low"></i>
+                  </button>
+                )}
+                <button onClick={() => setIsEditing(true)} className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Edit</button>
+              </div>
             )}
           </div>
 
