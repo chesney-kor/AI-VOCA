@@ -15,6 +15,7 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
   const [isEditing, setIsEditing] = useState(!((data as SavedWord).userSentence));
   const [isSaving, setIsSaving] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
 
   useEffect(() => {
     setPracticeText((data as SavedWord).userSentence || "");
@@ -22,14 +23,19 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
   }, [data]);
 
   const handlePlay = async (text: string, id: string) => {
-    if (playingId) return;
-    setPlayingId(id);
+    if (playingId || generatingId) return;
+    
     try {
-      await playSpeech(text);
+      setPlayingId(id);
+      await playSpeech(text, () => {
+        // If it starts generating (not in cache), update state
+        setGeneratingId(id);
+      });
     } catch (e) {
       console.error(e);
     } finally {
       setPlayingId(null);
+      setGeneratingId(null);
     }
   };
 
@@ -46,6 +52,8 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
     }
   };
 
+  const isAnyActionActive = !!playingId || !!generatingId;
+
   return (
     <div className="bg-white rounded-[2rem] shadow-lg border border-slate-200/60 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="p-5 border-b border-slate-100 bg-gradient-to-br from-indigo-50/20 to-white">
@@ -53,42 +61,56 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
           <h2 className="text-2xl font-black text-indigo-700 uppercase tracking-tighter">{data.word}</h2>
           <button 
             onClick={() => handlePlay(`The word is ${data.word}. The nuance is: ${data.nuance}`, 'main-word')}
-            disabled={!!playingId}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${playingId === 'main-word' ? 'bg-indigo-600 text-white animate-pulse' : 'bg-white text-indigo-500 shadow-sm active:scale-90'}`}
+            disabled={isAnyActionActive}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-sm active:scale-90 ${
+              generatingId === 'main-word' ? 'bg-amber-500 text-white animate-bounce' : 
+              playingId === 'main-word' ? 'bg-indigo-600 text-white animate-pulse' : 
+              'bg-white text-indigo-500'
+            }`}
           >
-            <i className={`fa-solid ${playingId === 'main-word' ? 'fa-volume-high' : 'fa-volume-low'}`}></i>
+            <i className={`fa-solid ${generatingId === 'main-word' ? 'fa-wand-magic-sparkles' : playingId === 'main-word' ? 'fa-volume-high' : 'fa-volume-low'}`}></i>
           </button>
         </div>
-        <div className="bg-white/80 p-3.5 rounded-xl border border-indigo-100 shadow-sm">
+        <div className="bg-white/80 p-3.5 rounded-xl border border-indigo-100 shadow-sm relative overflow-hidden">
+          {generatingId === 'main-word' && <div className="absolute top-0 left-0 w-full h-1 bg-amber-400 animate-pulse"></div>}
           <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Nuance</span>
           <p className="text-slate-800 text-[14px] font-bold leading-relaxed">{data.nuance}</p>
         </div>
       </div>
       
       <div className="p-5 space-y-5 bg-white">
-        {data.examples && data.examples.map((ex, idx) => (
-          <div key={idx} className="group">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">{ex.category.split('(')[0].trim()}</span>
-              <div className="h-[1px] flex-1 bg-slate-50"></div>
-              <button 
-                onClick={() => handlePlay(ex.sentence, `ex-${idx}`)}
-                disabled={!!playingId}
-                className={`p-1.5 rounded-lg transition-all ${playingId === `ex-${idx}` ? 'text-indigo-600' : 'text-slate-300 hover:text-indigo-400 active:scale-90'}`}
-              >
-                <i className={`fa-solid ${playingId === `ex-${idx}` ? 'fa-circle-play animate-spin' : 'fa-volume-low text-[10px]'}`}></i>
-              </button>
-            </div>
-            <p className="text-slate-900 text-[15px] font-bold leading-snug mb-1">
-              {ex.sentence}
-            </p>
-            {ex.explanation && (
-              <p className="text-slate-500 text-[12px] font-medium leading-relaxed bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100 inline-block">
-                {ex.explanation}
+        {data.examples && data.examples.map((ex, idx) => {
+          const isGenerating = generatingId === `ex-${idx}`;
+          const isPlaying = playingId === `ex-${idx}`;
+          
+          return (
+            <div key={idx} className="group">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">{ex.category.split('(')[0].trim()}</span>
+                <div className="h-[1px] flex-1 bg-slate-50"></div>
+                <button 
+                  onClick={() => handlePlay(ex.sentence, `ex-${idx}`)}
+                  disabled={isAnyActionActive}
+                  className={`p-1.5 rounded-lg transition-all ${
+                    isGenerating ? 'text-amber-500 animate-spin' :
+                    isPlaying ? 'text-indigo-600 animate-pulse' : 
+                    'text-slate-300 hover:text-indigo-400 active:scale-90'
+                  }`}
+                >
+                  <i className={`fa-solid ${isGenerating ? 'fa-arrows-rotate' : isPlaying ? 'fa-circle-play' : 'fa-volume-low text-[10px]'}`}></i>
+                </button>
+              </div>
+              <p className="text-slate-900 text-[15px] font-bold leading-snug mb-1">
+                {ex.sentence}
               </p>
-            )}
-          </div>
-        ))}
+              {ex.explanation && (
+                <p className="text-slate-500 text-[12px] font-medium leading-relaxed bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100 inline-block">
+                  {ex.explanation}
+                </p>
+              )}
+            </div>
+          );
+        })}
 
         <div className="mt-4 pt-4 border-t border-dashed border-slate-100">
           <div className="flex items-center justify-between mb-3">
@@ -98,10 +120,14 @@ const WordDetailCard: React.FC<WordDetailCardProps> = ({ data, onUpdatePractice 
                 {practiceText && (
                   <button 
                     onClick={() => handlePlay(practiceText, 'user-practice')}
-                    disabled={!!playingId}
-                    className={`text-[10px] ${playingId === 'user-practice' ? 'text-indigo-600' : 'text-slate-400'}`}
+                    disabled={isAnyActionActive}
+                    className={`text-[10px] transition-all ${
+                      generatingId === 'user-practice' ? 'text-amber-500 animate-spin' :
+                      playingId === 'user-practice' ? 'text-indigo-600 animate-pulse' : 
+                      'text-slate-400'
+                    }`}
                   >
-                    <i className="fa-solid fa-volume-low"></i>
+                    <i className={`fa-solid ${generatingId === 'user-practice' ? 'fa-arrows-rotate' : 'fa-volume-low'}`}></i>
                   </button>
                 )}
                 <button onClick={() => setIsEditing(true)} className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Edit</button>
