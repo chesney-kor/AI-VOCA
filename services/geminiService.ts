@@ -1,28 +1,9 @@
 
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { WordDetail, QuizQuestion } from "../types";
 import { SYSTEM_INSTRUCTION } from "../constants";
-import { getCachedAudio, setCachedAudio } from "./audioCacheService";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-// 전역 오디오 컨텍스트 싱글톤
-let globalAudioCtx: AudioContext | null = null;
-
-export const getAudioCtx = () => {
-  if (!globalAudioCtx) {
-    globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-  }
-  return globalAudioCtx;
-};
-
-// iOS/Safari용 오디오 잠금 해제 함수
-export const unlockAudio = async () => {
-  const ctx = getAudioCtx();
-  if (ctx.state === 'suspended') {
-    await ctx.resume();
-  }
-};
 
 const cleanJSONResponse = (text: string) => {
   return text.replace(/```json\n?|```/g, '').trim();
@@ -88,114 +69,4 @@ export const generateQuiz = async (savedWords: string[]): Promise<QuizQuestion> 
   const text = response.text;
   if (!text) throw new Error("Empty quiz response from AI");
   return JSON.parse(cleanJSONResponse(text)) as QuizQuestion;
-};
-
-// --- TTS Logic ---
-
-function decodeBase64(base64: string) {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number = 24000,
-  numChannels: number = 1,
-): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
-}
-
-export const cacheSpeech = async (text: string) => {
-  if (!text.trim()) return;
-  const cacheKey = `tts_${text.slice(0, 50)}_${text.length}`;
-  const existing = await getCachedAudio(cacheKey);
-  if (existing) return;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: text }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' },
-          },
-        },
-      },
-    });
-
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (base64Audio) {
-      await setCachedAudio(cacheKey, decodeBase64(base64Audio));
-    }
-  } catch (e) {
-    console.warn("Silent background caching failed:", e);
-  }
-};
-
-export const playSpeech = async (text: string, onGenerateStart?: () => void) => {
-  if (!text.trim()) return;
-
-  // CRITICAL: iOS/Safari를 위해 어떤 비동기 작업보다 먼저 컨텍스트를 깨웁니다.
-  const audioCtx = getAudioCtx();
-  if (audioCtx.state === 'suspended') {
-    await audioCtx.resume();
-  }
-
-  const cacheKey = `tts_${text.slice(0, 50)}_${text.length}`;
-  
-  try {
-    let audioData = await getCachedAudio(cacheKey);
-    
-    if (!audioData) {
-      if (onGenerateStart) onGenerateStart();
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: text }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
-            },
-          },
-        },
-      });
-
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (!base64Audio) throw new Error("No audio data received");
-      audioData = decodeBase64(base64Audio);
-      await setCachedAudio(cacheKey, audioData);
-    }
-
-    const audioBuffer = await decodeAudioData(audioData, audioCtx);
-    const source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioCtx.destination);
-    source.start(0);
-    
-    return new Promise((resolve) => {
-      source.onended = () => resolve(true);
-    });
-  } catch (error) {
-    console.error("Speech Process Error:", error);
-    throw error;
-  }
 };
