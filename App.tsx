@@ -230,7 +230,7 @@ const App: React.FC = () => {
               <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
                 <div className="max-w-[92%]">
                   {msg.role === 'assistant' && msg.content && typeof msg.content === 'object' && 'word' in msg.content ? (
-                    <WordDetailCard data={msg.content as SavedWord} onUpdatePractice={(s) => updateUserPractice((msg.content as SavedWord).id, s)} />
+                    <WordDetailCard data={msg.content as SavedWord} onUpdatePractice={(s: string) => updateUserPractice((msg.content as SavedWord).id, s)} />
                   ) : (
                     <div className={`px-4 py-3 rounded-2xl shadow-sm text-[15px] leading-relaxed ${
                       msg.role === 'user' ? 'bg-indigo-600 text-white font-semibold rounded-tr-none' : 'bg-white text-slate-800 border border-slate-200/60 font-medium rounded-tl-none'
@@ -287,7 +287,7 @@ const App: React.FC = () => {
                 <button onClick={() => removeWord(selectedWord.id)} className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-500 shadow-sm active:scale-90"><i className="fa-solid fa-trash-can"></i></button>
               </div>
               <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pt-4 pb-20">
-                <div className="max-w-xl mx-auto"><WordDetailCard key={selectedWord.id} data={selectedWord} onUpdatePractice={(s) => updateUserPractice(selectedWord.id, s)} /><div className="mt-4"><button onClick={() => setSelectedWord(null)} className="w-full py-4 bg-white text-slate-400 rounded-2xl font-black text-[12px] uppercase tracking-widest border border-slate-200 active:bg-slate-50 transition-all">Close</button></div></div>
+                <div className="max-w-xl mx-auto"><WordDetailCard key={selectedWord.id} data={selectedWord} onUpdatePractice={(s: string) => updateUserPractice(selectedWord.id, s)} /><div className="mt-4"><button onClick={() => setSelectedWord(null)} className="w-full py-4 bg-white text-slate-400 rounded-2xl font-black text-[12px] uppercase tracking-widest border border-slate-200 active:bg-slate-50 transition-all">Close</button></div></div>
               </div>
             </div>
           </div>
