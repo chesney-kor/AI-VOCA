@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChatMessage, SavedWord, WordDetail } from './types';
 import { getWordDetails } from './services/geminiService';
 import * as db from './services/supabaseService';
@@ -10,6 +10,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'chat' | 'list' | 'quiz'>('chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
+  const [vocabSearchQuery, setVocabSearchQuery] = useState(''); // 단어장 검색어 상태 추가
   const [isLoading, setIsLoading] = useState(false);
   const [savedWords, setSavedWords] = useState<SavedWord[]>([]);
   const [isLoaded, setIsLoaded] = useState(false); 
@@ -24,6 +25,16 @@ const App: React.FC = () => {
   const [dbUrl, setDbUrl] = useState(localStorage.getItem('supabase_url') || "");
   const [dbKey, setDbKey] = useState(localStorage.getItem('supabase_key') || "");
   const [dbUserId, setDbUserId] = useState(localStorage.getItem('supabase_user_id') || "lexi_user_shared");
+
+  // 검색어에 따른 필터링된 단어 목록
+  const filteredWords = useMemo(() => {
+    if (!vocabSearchQuery.trim()) return savedWords;
+    const query = vocabSearchQuery.toLowerCase();
+    return savedWords.filter(w => 
+      w.word.toLowerCase().includes(query) || 
+      w.nuance.toLowerCase().includes(query)
+    );
+  }, [savedWords, vocabSearchQuery]);
 
   const syncWithCloud = useCallback(async (localData: SavedWord[]): Promise<SavedWord[]> => {
     if (!db.isSupabaseConfigured()) return localData;
@@ -112,7 +123,6 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    // 로딩이 완전히 끝난(isLoaded === true) 상태에서만 localStorage 갱신
     if (isLoaded) {
       localStorage.setItem('efl_lexicon_saved', JSON.stringify(savedWords));
     }
@@ -303,14 +313,50 @@ const App: React.FC = () => {
                 </button>
               )}
             </div>
+
+            {/* Vocab Search Bar */}
+            {savedWords.length > 0 && (
+              <div className="relative group px-1">
+                <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 text-sm"></i>
+                <input 
+                  type="text" 
+                  value={vocabSearchQuery} 
+                  onChange={(e) => setVocabSearchQuery(e.target.value)} 
+                  placeholder="Filter by word or nuance..." 
+                  className="w-full bg-white border border-slate-200 rounded-2xl pl-10 pr-10 py-3.5 text-sm font-semibold outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/5 transition-all"
+                />
+                {vocabSearchQuery && (
+                  <button 
+                    onClick={() => setVocabSearchQuery('')}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 p-1"
+                  >
+                    <i className="fa-solid fa-circle-xmark"></i>
+                  </button>
+                )}
+              </div>
+            )}
+
             {savedWords.length === 0 ? (
-              <div className="text-center py-16 bg-white rounded-3xl border-2 border-dashed border-slate-200"><p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Your Lexicon is Empty</p></div>
+              <div className="text-center py-16 bg-white rounded-3xl border-2 border-dashed border-slate-200">
+                <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Your Lexicon is Empty</p>
+              </div>
+            ) : filteredWords.length === 0 ? (
+              <div className="text-center py-12 bg-white rounded-3xl border border-slate-200">
+                <i className="fa-solid fa-face-dashed text-slate-200 text-3xl mb-3 block"></i>
+                <p className="text-slate-400 font-bold text-sm">No results found for "{vocabSearchQuery}"</p>
+              </div>
             ) : (
               <div className="grid grid-cols-1 gap-2.5">
-                {savedWords.map((word) => (
-                  <div key={word.id} className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex items-center justify-between active:bg-slate-50 transition-all cursor-pointer group" onClick={() => setSelectedWord(word)}>
-                    <div className="flex-1"><h3 className="text-base font-black text-indigo-600 uppercase tracking-tight mb-0.5">{word.word}</h3><p className="text-slate-500 text-[11px] italic line-clamp-1">{word.nuance}</p></div>
-                    <div className="flex items-center gap-3"><i className="fa-solid fa-chevron-right text-slate-200 text-xs"></i><button onClick={(e) => { e.stopPropagation(); removeWord(word.id); }} className="text-slate-300 active:text-rose-500 p-2"><i className="fa-solid fa-trash-can"></i></button></div>
+                {filteredWords.map((word) => (
+                  <div key={word.id} className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex items-center justify-between active:bg-slate-50 transition-all cursor-pointer group animate-in fade-in slide-in-from-bottom-2" onClick={() => setSelectedWord(word)}>
+                    <div className="flex-1">
+                      <h3 className="text-base font-black text-indigo-600 uppercase tracking-tight mb-0.5">{word.word}</h3>
+                      <p className="text-slate-500 text-[11px] italic line-clamp-1">{word.nuance}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <i className="fa-solid fa-chevron-right text-slate-200 text-xs"></i>
+                      <button onClick={(e) => { e.stopPropagation(); removeWord(word.id); }} className="text-slate-300 active:text-rose-500 p-2"><i className="fa-solid fa-trash-can"></i></button>
+                    </div>
                   </div>
                 ))}
               </div>
